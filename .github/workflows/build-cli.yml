@@ -1,0 +1,30 @@
+name: Build signal source CLI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Build CLI
+        run: cargo build --release
+      - name: Upload CLI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: newsliquid-signal-cli-linux-x86_64
+          path: cli/target/release/newsliquid-signal-cli

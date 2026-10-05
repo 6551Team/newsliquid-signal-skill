@@ -1,0 +1,122 @@
+# NewsLiquid 시그널 소스 SDK
+
+이 저장소는 외부 시스템이 NewsLiquid 시그널 소스로 `NewsItem` 시그널을 전송할 수 있도록 합니다.
+
+저장소 구성:
+
+- `typescript/`: 네이티브 `fetch`를 사용하는 Node.js 18+ SDK
+- `python/`: 표준 라이브러리만 사용하는 Python 3.10+ SDK
+- `cli/`: 시그널 전송용 Rust 명령줄 도구
+
+영문 문서는 [README.md](../README.md)에서 확인할 수 있습니다.
+
+## 시그널 소스 만들기
+
+NewsLiquid에 로그인한 뒤 [전략 페이지](https://app.newsliquid.com/strategy)를 엽니다.
+
+1. “내 시그널 소스” 탭을 열고 “시그널 소스 만들기”를 클릭합니다.
+2. 시그널 소스 이름, 설명, 공식 웹사이트를 입력합니다.
+3. 공개 여부를 선택합니다. 공개 시그널 소스는 심사를 통과한 후 다른 사용자가 구독할 수 있습니다.
+4. 저장한 뒤 상세 화면에서 `App ID`와 `App Secret`을 확인합니다.
+5. 전송 프로그램의 환경 변수에 인증 정보를 설정합니다.
+
+`App ID`와 `App Secret`은 시그널 소스 생성자만 확인할 수 있습니다. Secret을 소스 저장소, 로그, 브라우저 코드 또는 클라이언트 애플리케이션에 저장하지 마세요.
+
+## 푸시 프로토콜
+
+```text
+POST https://news-api.newsliquid.com/api/v2/signal-sources/push/{appId}/events
+X-Signal-Timestamp: Unix 초 단위 타임스탬프
+X-Signal-Nonce: 요청마다 고유한 임의의 값
+X-Signal-Signature: 소문자 hex HMAC-SHA256(appSecret, timestamp + "\n" + nonce + "\n" + 원본 JSON 바이트)
+```
+
+요청 본문은 `NewsItem` JSON 객체여야 하며 `text`와 RFC3339 형식의 `ts`만 필요합니다. `id`는 선택 사항이며 생략하면 백엔드가 UUID를 생성합니다.
+
+```json
+{
+  "id": "provider-event-001",
+  "text": "BTC breaks above resistance",
+  "description": "Optional details",
+  "link": "https://example.com/event/001",
+  "source": "provider-name",
+  "coins": [{"symbol": "BTC", "market_type": "cex"}],
+  "tags": ["breakout"],
+  "score": 85,
+  "signal": "long",
+  "ts": "2026-09-29T08:30:00Z"
+}
+```
+
+같은 시그널 소스 안에서 `id`는 안정적으로 유지해야 하며 최대 256바이트입니다. 네트워크 오류를 재시도할 때는 같은 `id`를 사용하세요. 요청마다 새로운 nonce, 타임스탬프, 서명이 생성됩니다. 전략 이벤트 키는 시그널 소스와 `id`로 만들며 요청은 메모리에서만 정규화되고 News 테이블에는 저장되지 않습니다. 요청 본문은 최대 2MiB이고 타임스탬프 차이는 약 5분 이내여야 합니다.
+
+## Node.js / TypeScript SDK
+
+```ts
+import { SignalSourceClient } from "@newsliquid/signal-source";
+
+const client = new SignalSourceClient({
+  appId: process.env.SIGNAL_SOURCE_APP_ID!,
+  appSecret: process.env.SIGNAL_SOURCE_APP_SECRET!,
+});
+
+const result = await client.push({
+  id: `provider-${Date.now()}`,
+  text: "BTC momentum signal",
+  source: "my-provider",
+  signal: "long",
+  score: 85,
+  ts: new Date().toISOString(),
+});
+console.log(result);
+```
+
+빌드:
+
+```bash
+cd typescript
+npm install
+npm run build
+```
+
+## Python SDK
+
+```python
+from newsliquid_signal_source import SignalSourceClient
+import os
+
+client = SignalSourceClient(
+    app_id=os.environ["SIGNAL_SOURCE_APP_ID"],
+    app_secret=os.environ["SIGNAL_SOURCE_APP_SECRET"],
+)
+print(client.push({
+    "id": "provider-001",
+    "text": "BTC momentum signal",
+    "source": "my-provider",
+    "signal": "long",
+    "ts": "2026-09-29T08:30:00Z",
+}))
+```
+
+## Rust CLI
+
+CLI는 표준 입력에서 하나의 `NewsItem` JSON을 읽으며 `--file`로 파일을 지정할 수도 있습니다. 인증 정보와 선택적인 서비스 URL은 환경 변수에서 읽습니다.
+
+```bash
+export SIGNAL_SOURCE_APP_ID="..."
+export SIGNAL_SOURCE_APP_SECRET="..."
+
+printf '%s' '{"id":"provider-001","text":"BTC momentum signal","ts":"2026-09-29T08:30:00Z"}' \
+  | cargo run --manifest-path cli/Cargo.toml --release
+```
+
+파일 전송:
+
+```bash
+SIGNAL_SOURCE_APP_ID="..." \
+SIGNAL_SOURCE_APP_SECRET="..." \
+cargo run --manifest-path cli/Cargo.toml --release -- --file signal.json
+```
+
+기본 서비스 URL은 `https://news-api.newsliquid.com`입니다. 다른 환경을 테스트하려면 `SIGNAL_SOURCE_BASE_URL`을 설정하세요. GitHub Actions는 Linux x86_64 CLI를 빌드하고 workflow artifact로 업로드합니다.
+푸시 데이터에서 필수 필드는 `text`와 `ts`뿐입니다. `id`, `description`, `score`, `signal`, `coins`, `source`, `link`는 선택 사항이며 `id`를 생략하면 백엔드가 UUID를 생성합니다.
