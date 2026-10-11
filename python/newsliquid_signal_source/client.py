@@ -1,4 +1,4 @@
-"""Small standard-library client for the NewsLiquid signal push API."""
+"""Small standard-library client for NewsLiquid signal source APIs."""
 from __future__ import annotations
 
 import hashlib
@@ -17,7 +17,7 @@ USER_AGENT = "newsliquid-signal-source-python/0.1.0"
 
 
 class SignalSourceError(RuntimeError):
-    """A push request failed or the payload could not be sent."""
+    """A signal source request failed or the payload could not be sent."""
 
     def __init__(self, message: str, status: int | None = None, body: str | None = None):
         super().__init__(message)
@@ -26,7 +26,7 @@ class SignalSourceError(RuntimeError):
 
 
 class SignalSourceClient:
-    """Push NewsItem dictionaries using App ID/App Secret HMAC authentication.
+    """Push NewsItems and edit a source using App ID/App Secret authentication.
 
     ``clock`` and ``nonce_factory`` are injectable to make signing deterministic in
     tests. ``urlopen_fn`` is optional and is useful for applications that provide a
@@ -65,14 +65,29 @@ class SignalSourceClient:
         """
         payload = dict(event)
         self._validate(payload)
+        return self._request(f"/api/v2/signal-sources/push/{quote(self.app_id, safe='')}/events", payload, "push")
+
+    def update(self, config: Mapping[str, Any]) -> dict[str, Any]:
+        """Edit this credential's source. Omitted fields remain unchanged.
+
+        Supports name, description, website, visibility, monetizationType,
+        quotaAmount, billingPeriod, and metaSchema. Existing review and schema
+        compatibility rules apply; inspect the returned effective/pending fields.
+        """
+        if not isinstance(config, Mapping):
+            raise ValueError("source configuration must be an object")
+        return self._request(f"/api/v2/signal-sources/apps/{quote(self.app_id, safe='')}", dict(config), "update")
+
+    def _request(self, path: str, payload: dict[str, Any], operation: str) -> dict[str, Any]:
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         timestamp = str(int(self._clock()))
         nonce = self._nonce_factory()
         if not nonce or len(nonce) > 128:
             raise ValueError("nonce must contain 1 to 128 characters")
-        message = timestamp.encode("ascii") + b"\n" + nonce.encode("utf-8") + b"\n" + body
+        marker = b"signal-source:update\n" if operation == "update" else b""
+        message = timestamp.encode("ascii") + b"\n" + nonce.encode("utf-8") + b"\n" + marker + body
         signature = hmac.new(self._app_secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
-        url = f"{self.base_url}/api/v2/signal-sources/push/{quote(self.app_id, safe='')}/events"
+        url = f"{self.base_url}{path}"
         request = Request(
             url,
             data=body,
@@ -91,13 +106,15 @@ class SignalSourceClient:
                 status = getattr(response, "status", response.getcode())
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
-            raise SignalSourceError(_error_message(exc.code, detail), exc.code, detail) from exc
+            raise SignalSourceError(_error_message(exc.code, detail, operation), exc.code, detail) from exc
         except (URLError, TimeoutError, OSError) as exc:
-            raise SignalSourceError(f"signal push request failed: {exc}") from exc
-        return _decode_response(status, raw_response)
+            raise SignalSourceError(f"signal {operation} request failed: {exc}") from exc
+        return _decode_response(status, raw_response, operation)
 
     @staticmethod
     def _validate(payload: Mapping[str, Any]) -> None:
+        if "meta" in payload and not isinstance(payload["meta"], dict):
+            raise ValueError("meta must be an object")
         for field in ("text", "ts"):
             if not isinstance(payload.get(field), str) or not payload[field].strip():
                 raise ValueError(f"{field} is required")
@@ -111,26 +128,26 @@ class SignalSourceClient:
             raise ValueError("tags must be an object or array")
 
 
-def _decode_response(status: int, raw: bytes) -> dict[str, Any]:
+def _decode_response(status: int, raw: bytes, operation: str) -> dict[str, Any]:
     text = raw.decode("utf-8", errors="replace")
     try:
         document = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise SignalSourceError("signal push returned invalid JSON", status, text) from exc
+        raise SignalSourceError(f"signal {operation} returned invalid JSON", status, text) from exc
     if status < 200 or status >= 300:
-        raise SignalSourceError(_error_message(status, text), status, text)
+        raise SignalSourceError(_error_message(status, text, operation), status, text)
     if isinstance(document, dict) and isinstance(document.get("data"), dict):
         return document["data"]
     return document if isinstance(document, dict) else {"value": document}
 
 
-def _error_message(status: int, body: str) -> str:
+def _error_message(status: int, body: str, operation: str) -> str:
     try:
         parsed = json.loads(body)
         if isinstance(parsed, dict):
             message = parsed.get("message") or parsed.get("error")
             if message:
-                return f"signal push failed ({status}): {message}"
+                return f"signal {operation} failed ({status}): {message}"
     except json.JSONDecodeError:
         pass
-    return f"signal push failed ({status})"
+    return f"signal {operation} failed ({status})"

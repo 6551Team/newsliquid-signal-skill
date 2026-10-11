@@ -20,6 +20,7 @@ export interface Coin {
 }
 
 export interface NewsItem {
+  meta?: Record<string, string | number | boolean>;
   id?: string;
   text: string;
   ts: string;
@@ -36,6 +37,41 @@ export interface NewsItem {
 export interface PushResponse {
   dbNewsId?: string;
   queued?: boolean;
+  [key: string]: unknown;
+}
+
+export interface SignalSourceMetaField {
+  key: string;
+  label: string;
+  type: "enum" | "number" | "boolean" | "text";
+  options?: string[];
+  /** Only for compatibility with older number fields. */
+  operator?: "in" | "gt" | "gte" | "lt" | "lte" | "eq" | "contains";
+}
+
+/** Omitted fields remain unchanged. */
+export interface SignalSourceUpdate {
+  name?: string;
+  description?: string;
+  website?: string;
+  visibility?: "private" | "public";
+  monetizationType?: "free" | "paid";
+  quotaAmount?: number | string;
+  billingPeriod?: "one_time" | "monthly";
+  metaSchema?: SignalSourceMetaField[];
+}
+
+export interface SignalSourceResponse {
+  id: number;
+  name: string;
+  description: string;
+  website: string;
+  visibility: "private" | "public";
+  monetizationType: "free" | "paid";
+  quotaAmount: string | number;
+  billingPeriod: "one_time" | "monthly";
+  metaSchema: SignalSourceMetaField[] | null;
+  reviewStatus: string;
   [key: string]: unknown;
 }
 
@@ -86,16 +122,28 @@ export class SignalSourceClient {
 
   async push(event: NewsItem): Promise<PushResponse> {
     validateEvent(event);
-    const body = JSON.stringify(event);
+    return this.request<PushResponse>(`/api/v2/signal-sources/push/${encodeURIComponent(this.appId)}/events`, event, "push");
+  }
+
+  /** Edit the source bound to these credentials using the owner's existing rules. */
+  async update(input: SignalSourceUpdate): Promise<SignalSourceResponse> {
+    if (!isRecord(input)) throw new Error("source configuration must be an object");
+    return this.request<SignalSourceResponse>(`/api/v2/signal-sources/apps/${encodeURIComponent(this.appId)}`, input, "update");
+  }
+
+  private async request<T extends Record<string, unknown>>(path: string, payload: object, operation: "push" | "update"): Promise<T> {
+    const body = JSON.stringify(payload);
     const timestamp = String(Math.floor(this.clock()));
     const nonce = this.nonceFactory();
     if (!nonce || nonce.length > 128) throw new Error("nonce must contain 1 to 128 characters");
-    const message = `${timestamp}\n${nonce}\n${body}`;
+    const marker = operation === "update" ? "signal-source:update\n" : "";
+    const message = `${timestamp}\n${nonce}\n${marker}${body}`;
     const signature = createHmac("sha256", this.appSecret).update(message, "utf8").digest("hex");
-    const url = `${this.baseUrl}/api/v2/signal-sources/push/${encodeURIComponent(this.appId)}/events`;
+    const url = `${this.baseUrl}${path}`;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     let response: Response;
+    let raw: string;
     try {
       response = await this.requestFetch(url, {
         method: "POST",
@@ -108,27 +156,28 @@ export class SignalSourceClient {
         body,
         signal: controller.signal,
       });
+      raw = await response.text();
     } catch (error) {
-      throw new SignalSourceError(`signal push request failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw new SignalSourceError(`signal ${operation} request failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       clearTimeout(timer);
     }
-    const raw = await response.text();
     let document: unknown;
     try {
       document = JSON.parse(raw);
     } catch (error) {
-      throw new SignalSourceError("signal push returned invalid JSON", response.status, raw);
+      throw new SignalSourceError(`signal ${operation} returned invalid JSON`, response.status, raw);
     }
     if (!response.ok) {
-      throw new SignalSourceError(errorMessage(response.status, document), response.status, raw);
+      throw new SignalSourceError(errorMessage(response.status, document, operation), response.status, raw);
     }
-    if (isRecord(document) && isRecord(document.data)) return document.data as PushResponse;
-    return isRecord(document) ? document as PushResponse : { value: document };
+    if (isRecord(document) && isRecord(document.data)) return document.data as T;
+    return (isRecord(document) ? document : { value: document }) as T;
   }
 }
 
 function validateEvent(event: NewsItem): void {
+  if (event.meta !== undefined && !isRecord(event.meta)) throw new Error("meta must be an object");
   for (const field of ["text", "ts"] as const) {
     if (typeof event[field] !== "string" || !event[field].trim()) throw new Error(`${field} is required`);
   }
@@ -145,7 +194,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function errorMessage(status: number, document: unknown): string {
+function errorMessage(status: number, document: unknown, operation: string): string {
   const message = isRecord(document) && (document.message ?? document.error);
-  return `signal push failed (${status})${typeof message === "string" ? `: ${message}` : ""}`;
+  return `signal ${operation} failed (${status})${typeof message === "string" ? `: ${message}` : ""}`;
 }
