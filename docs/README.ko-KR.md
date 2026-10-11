@@ -91,7 +91,7 @@ SDK와 CLI가 작업 표시자를 자동으로 추가합니다. 시간 허용 �
 | `billingPeriod` | `one_time` / `monthly` |
 | `metaSchema` | 전체 `{key,label,type,options?}` 정의 배열. `enum`, `number`, `boolean`, `text` 지원 |
 
-이름, 설명, 웹사이트와 호환되는 필드 변경은 즉시 적용되며 변경 이력을 기록합니다. 기존 key, 타입, 열거 옵션을 유지하면서 필드/옵션 추가나 표시 이름 수정이 가능합니다. 공개 요금은 기존 심사 규칙을 따르며 무료, 동일 청구 주기 내 요금 인하, 설정 한도 이하의 요금은 자동 적용됩니다. 심사 대기 상태도 저장에 성공하면 HTTP `200`을 반환하므로 `reviewStatus`, 현재 요금, `pendingMonetizationType` / `pendingQuotaAmount` / `pendingBillingPeriod`를 확인하세요. 소유자가 비활성화한 소스는 수정할 수 있지만 삭제되거나 관리자가 중지한 소스는 수정할 수 없습니다.
+이름, 설명, 웹사이트와 호환되는 필드 변경은 즉시 적용되며 변경 이력을 기록합니다. 기존 key와 타입을 유지하면서 필드 추가, 표시 이름 수정, 열거 옵션 추가·삭제·변경이 가능합니다. 비어 있지 않고 중복되지 않는 열거 옵션을 최소 하나 남겨야 합니다. 기존 전략에서 삭제된 선택 항목은 더 이상 일치하지 않으며 남은 항목은 계속 작동합니다. 새 신호 전송이나 전략 설정 저장 시 현재 옵션을 사용하세요. 공개 요금은 기존 심사 규칙을 따르며 무료, 동일 청구 주기 내 요금 인하, 설정 한도 이하의 요금은 자동 적용됩니다. 심사 대기 상태도 저장에 성공하면 HTTP `200`을 반환하므로 `reviewStatus`, 현재 요금, `pendingMonetizationType` / `pendingQuotaAmount` / `pendingBillingPeriod`를 확인하세요. 소유자가 비활성화한 소스는 수정할 수 있지만 삭제되거나 관리자가 중지한 소스는 수정할 수 없습니다.
 
 ## Node.js / TypeScript SDK
 

@@ -91,7 +91,7 @@ timestamp + "\n" + nonce + "\n" + "signal-source:update\n" + 生の JSON バイ�
 | `billingPeriod` | `one_time` / `monthly` |
 | `metaSchema` | `{key,label,type,options?}` の全定義。型は `enum`、`number`、`boolean`、`text` |
 
-名前、説明、サイト、互換性のあるスキーマ変更は即時反映され、履歴に記録されます。既存の key、型、列挙値を残したまま、フィールドや選択肢の追加、ラベル変更が可能です。公開料金は既存の審査ルールを適用し、無料、同じ課金周期内の値下げ、設定上限以下の料金は自動反映されます。審査待ちでも保存成功時は HTTP `200` を返すため、`reviewStatus`、有効な料金、`pendingMonetizationType` / `pendingQuotaAmount` / `pendingBillingPeriod` を確認してください。所有者が無効にしたソースは編集できますが、削除済みまたは管理者が停止したソースは編集できません。
+名前、説明、サイト、互換性のあるスキーマ変更は即時反映され、履歴に記録されます。既存の key と型を残したまま、フィールド追加、ラベル変更、列挙値の追加・削除・変更が可能です。空でない重複のない列挙値を少なくとも一つ残してください。既存のストラテジーで削除された選択肢は一致しなくなり、残った選択肢は引き続き機能します。新しい送信やストラテジー設定の保存には現在の選択肢を使ってください。公開料金は既存の審査ルールを適用し、無料、同じ課金周期内の値下げ、設定上限以下の料金は自動反映されます。審査待ちでも保存成功時は HTTP `200` を返すため、`reviewStatus`、有効な料金、`pendingMonetizationType` / `pendingQuotaAmount` / `pendingBillingPeriod` を確認してください。所有者が無効にしたソースは編集できますが、削除済みまたは管理者が停止したソースは編集できません。
 
 ## Node.js / TypeScript SDK
 
