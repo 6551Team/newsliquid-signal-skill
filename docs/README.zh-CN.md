@@ -93,7 +93,7 @@ timestamp + "\n" + nonce + "\n" + "signal-source:update\n" + 原始 JSON 字节
 | `billingPeriod` | `one_time` / `monthly` |
 | `metaSchema` | 完整的 `{key,label,type,options?}` 字段数组；类型支持 `enum`、`number`、`boolean`、`text` |
 
-名称、描述、官网及兼容的字段定义修改立即生效并记录变更。提交 `metaSchema` 时保留原有 key 和类型，可增加字段、修改名称或增删、修改枚举选项。枚举至少保留一个非空且不重复的选项。旧策略选中的已删除项不再命中，保留项继续有效；推送和保存策略参数时使用当前选项。公开收费沿用现有审核规则：免费、同一周期内降价及不超过系统阈值时自动生效。需要审核的价格保存成功也返回 HTTP `200`，应查看响应中的 `reviewStatus`、当前价格和 `pendingMonetizationType` / `pendingQuotaAmount` / `pendingBillingPeriod`，以确认实际生效配置。用户禁用的信号源可编辑，已删除或管理员暂停的不可编辑。
+名称、描述、官网及有效的字段定义修改立即生效并记录变更。提交 `metaSchema` 时保留原有 key，可增加字段、修改类型、名称或增删、修改枚举选项。切换类型时，比较方式和选项须符合新类型；枚举至少保留一个非空且不重复的选项。类型变更后不兼容的旧策略过滤条件不再命中，需重新配置。旧策略选中的已删除枚举项不再命中，保留项继续有效；新推送和保存的策略参数须符合当前定义。公开收费沿用现有审核规则：免费、同一周期内降价及不超过系统阈值时自动生效。需要审核的价格保存成功也返回 HTTP `200`，应查看响应中的 `reviewStatus`、当前价格和 `pendingMonetizationType` / `pendingQuotaAmount` / `pendingBillingPeriod`，以确认实际生效配置。用户禁用的信号源可编辑，已删除或管理员暂停的不可编辑。
 
 ## Node.js / TypeScript SDK
 
