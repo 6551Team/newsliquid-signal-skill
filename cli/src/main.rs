@@ -27,11 +27,14 @@ async fn main() {
 }
 
 async fn run() -> Result<(), String> {
-    let (operation, input) = read_input()?;
-    let payload: Value = serde_json::from_slice(&input)
+    let (operation, test, input) = read_input()?;
+    let mut payload: Value = serde_json::from_slice(&input)
         .map_err(|error| format!("input must be a JSON object: {error}"))?;
     if operation == Operation::Push {
         validate_payload(&payload)?;
+        if test {
+            payload["test"] = Value::Bool(true);
+        }
     } else if !payload.is_object() {
         return Err("source configuration must be a JSON object".to_string());
     }
@@ -110,7 +113,9 @@ async fn run() -> Result<(), String> {
     Ok(())
 }
 
-fn parse_args(args: impl Iterator<Item = String>) -> Result<(Operation, Option<String>), String> {
+fn parse_args(
+    args: impl Iterator<Item = String>,
+) -> Result<(Operation, bool, Option<String>), String> {
     let mut args = args.peekable();
     let operation = match args.peek().map(String::as_str) {
         Some("update") => {
@@ -124,21 +129,26 @@ fn parse_args(args: impl Iterator<Item = String>) -> Result<(Operation, Option<S
         _ => Operation::Push,
     };
     let mut file = None;
+    let mut test = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => {
-                println!("Usage: newsliquid-signal-cli [push|update] [--file PATH]\n\nReads one JSON object from stdin by default.\n  push    Send a NewsItem (default)\n  update  Edit the signal source bound to the credentials");
+                println!("Usage: newsliquid-signal-cli [push|update] [--file PATH] [--test]\n\nReads one JSON object from stdin by default.\n  push    Send a NewsItem (default)\n  update  Edit the signal source bound to the credentials\n  --test  Save a push in source history without strategy delivery");
                 std::process::exit(0);
             }
             "--file" | "-f" => file = Some(args.next().ok_or("--file requires a path")?),
+            "--test" => test = true,
             value => return Err(format!("unknown argument: {value}; use --help")),
         }
     }
-    Ok((operation, file))
+    if test && operation != Operation::Push {
+        return Err("--test is only supported for push".to_string());
+    }
+    Ok((operation, test, file))
 }
 
-fn read_input() -> Result<(Operation, Vec<u8>), String> {
-    let (operation, file) = parse_args(env::args().skip(1))?;
+fn read_input() -> Result<(Operation, bool, Vec<u8>), String> {
+    let (operation, test, file) = parse_args(env::args().skip(1))?;
     let input = if let Some(path) = file {
         fs::read(path).map_err(|error| format!("cannot read input file: {error}"))?
     } else {
@@ -148,7 +158,7 @@ fn read_input() -> Result<(Operation, Vec<u8>), String> {
             .map_err(|error| format!("cannot read stdin: {error}"))?;
         input
     };
-    Ok((operation, input))
+    Ok((operation, test, input))
 }
 
 fn sign_request(
@@ -177,6 +187,9 @@ fn required_env(name: &str) -> Result<String, String> {
 
 fn validate_payload(payload: &Value) -> Result<(), String> {
     let object = payload.as_object().ok_or("input must be a JSON object")?;
+    if object.get("test").is_some_and(|test| !test.is_boolean()) {
+        return Err("test must be a boolean".to_string());
+    }
     if let Some(meta) = object.get("meta") {
         if !meta.is_object() {
             return Err("meta must be an object".to_string());
@@ -237,12 +250,34 @@ mod tests {
                 Some("source.json"),
             ),
         ] {
-            let (operation, file) = parse_args(args.into_iter().map(String::from)).unwrap();
+            let (operation, test, file) = parse_args(args.into_iter().map(String::from)).unwrap();
             assert_eq!(operation, expected_operation);
+            assert!(!test);
             assert_eq!(file.as_deref(), expected_file);
         }
         assert!(parse_args(vec!["update", "--file"].into_iter().map(String::from)).is_err());
         assert!(parse_args(vec!["delete"].into_iter().map(String::from)).is_err());
+    }
+
+    #[test]
+    fn test_push_flag_does_not_apply_to_updates() {
+        for args in [
+            vec!["--test"],
+            vec!["push", "--test"],
+            vec!["push", "--file", "signal.json", "--test"],
+        ] {
+            let (operation, test, _) = parse_args(args.into_iter().map(String::from)).unwrap();
+            assert_eq!(operation, Operation::Push);
+            assert!(test);
+        }
+        assert!(parse_args(vec!["update", "--test"].into_iter().map(String::from)).is_err());
+        let payload =
+            serde_json::json!({"text": "signal", "ts": "2026-10-12T08:00:00Z", "test": true});
+        assert!(validate_payload(&payload).is_ok());
+        assert!(validate_payload(
+            &serde_json::json!({"text": "signal", "ts": "now", "test": "true"})
+        )
+        .is_err());
     }
 
     #[test]

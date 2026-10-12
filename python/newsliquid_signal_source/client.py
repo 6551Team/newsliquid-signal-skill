@@ -56,14 +56,17 @@ class SignalSourceClient:
         self._nonce_factory = nonce_factory
         self._urlopen = urlopen_fn
 
-    def push(self, event: Mapping[str, Any]) -> dict[str, Any]:
+    def push(self, event: Mapping[str, Any], *, test: bool | None = None) -> dict[str, Any]:
         """Push one event and return the server's ``data`` object.
 
         The exact compact JSON bytes used for the request are also the bytes used
         in the HMAC message. The event's ``id`` is therefore safe to reuse when a
         caller retries after a network failure.
+        Set ``test=True`` to save only in source history, without strategy delivery.
         """
         payload = dict(event)
+        if test is not None:
+            payload["test"] = test
         self._validate(payload)
         return self._request(f"/api/v2/signal-sources/push/{quote(self.app_id, safe='')}/events", payload, "push")
 
@@ -71,7 +74,7 @@ class SignalSourceClient:
         """Edit this credential's source. Omitted fields remain unchanged.
 
         Supports name, description, website, visibility, monetizationType,
-        quotaAmount, billingPeriod, and metaSchema. Existing review and schema
+        quotaAmount, billingPeriod, metaSchema, and muteOwnSignals. Existing review and schema
         compatibility rules apply; inspect the returned effective/pending fields.
         """
         if not isinstance(config, Mapping):
@@ -113,6 +116,8 @@ class SignalSourceClient:
 
     @staticmethod
     def _validate(payload: Mapping[str, Any]) -> None:
+        if "test" in payload and not isinstance(payload["test"], bool):
+            raise ValueError("test must be a boolean")
         if "meta" in payload and not isinstance(payload["meta"], dict):
             raise ValueError("meta must be an object")
         for field in ("text", "ts"):

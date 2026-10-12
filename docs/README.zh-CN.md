@@ -50,6 +50,26 @@ X-Signal-Signature：小写十六进制 HMAC-SHA256(appSecret, timestamp + "\n" 
 
 同一个信号源内，`id` 应保持稳定，最长 256 字节。网络错误重试时复用同一个 `id`；每次请求都会生成新的 nonce、时间戳和签名。策略事件键由信号源和 `id` 组成；请求只在内存中标准化，不写入 News 表。请求体上限为 2 MiB，时间戳与服务端的偏差应控制在约 5 分钟内。
 
+## 测试推送
+
+测试推送沿用同一接口、签名及格式和 meta 校验，只保存到所有者可查询的信号源推送记录，不分发给任何策略或订阅者。响应包含 `test: true`、`queued: false`，记录包含 `payload.test: true`，页面显示“测试推送”。省略选项或传 `false` 则正常分发。
+
+```ts
+await client.push({ text: "Test signal", ts: new Date().toISOString() }, { test: true });
+```
+
+```python
+client.push({"text": "Test signal", "ts": "2026-10-12T08:00:00Z"}, test=True)
+```
+
+```bash
+newsliquid-signal-cli push --test --file signal.json
+```
+
+直接调用 HTTP 时，在签名的 JSON 请求体中加入 `"test":true`。这是单次请求的布尔选项，CLI 的 `--test` 只支持推送。测试和正式消息请使用不同 ID，或省略 ID 由后端生成 UUID。使用测试模式前先升级后端。
+
+“我的信号源”卡片上的“接收自己的信号”开关与测试模式独立。Node.js 使用 `client.update({ muteOwnSignals: true })`，Python 使用 `client.update({"muteOwnSignals": True})`，仅停止创建者自己的策略接收正常推送，订阅者继续接收；传 `false` 可恢复。默认 `false`，不改变公开状态或已有记录。
+
 ## 订阅过滤参数（meta）
 
 创建或编辑信号源时可定义枚举、数字、布尔和文本过滤字段。创建者只配置字段和枚举选项；订阅者在策略中选择数字的 `gt`/`gte`/`lt`/`lte`/`eq` 或文本的 `contains`/`eq` 比较方式。文本不区分大小写，按字面包含或相等匹配。平台收到推送后按策略过滤。
@@ -88,6 +108,7 @@ timestamp + "\n" + nonce + "\n" + "signal-source:update\n" + 原始 JSON 字节
 | --- | --- |
 | `name`、`description`、`website` | 字符串；描述、官网传空字符串可清空 |
 | `visibility` | `private` / `public` |
+| `muteOwnSignals` | 布尔值，默认 `false`；`true` 仅停止创建者自己的策略接收 |
 | `monetizationType` | `free` / `paid` |
 | `quotaAmount` | 数字或十进制字符串；转免费时同时传 `0` |
 | `billingPeriod` | `one_time` / `monthly` |

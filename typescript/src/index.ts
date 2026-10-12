@@ -20,6 +20,8 @@ export interface Coin {
 }
 
 export interface NewsItem {
+  /** Save in source history without delivering to any strategy. */
+  test?: boolean;
   meta?: Record<string, string | number | boolean>;
   id?: string;
   text: string;
@@ -37,7 +39,12 @@ export interface NewsItem {
 export interface PushResponse {
   dbNewsId?: string;
   queued?: boolean;
+  test?: boolean;
   [key: string]: unknown;
+}
+
+export interface PushOptions {
+  test?: boolean;
 }
 
 export interface SignalSourceMetaField {
@@ -59,6 +66,7 @@ export interface SignalSourceUpdate {
   quotaAmount?: number | string;
   billingPeriod?: "one_time" | "monthly";
   metaSchema?: SignalSourceMetaField[];
+  muteOwnSignals?: boolean;
 }
 
 export interface SignalSourceResponse {
@@ -72,6 +80,7 @@ export interface SignalSourceResponse {
   billingPeriod: "one_time" | "monthly";
   metaSchema: SignalSourceMetaField[] | null;
   reviewStatus: string;
+  muteOwnSignals?: boolean;
   [key: string]: unknown;
 }
 
@@ -120,9 +129,10 @@ export class SignalSourceClient {
     if (!this.requestFetch) throw new Error("global fetch is unavailable; provide options.fetch");
   }
 
-  async push(event: NewsItem): Promise<PushResponse> {
-    validateEvent(event);
-    return this.request<PushResponse>(`/api/v2/signal-sources/push/${encodeURIComponent(this.appId)}/events`, event, "push");
+  async push(event: NewsItem, options: PushOptions = {}): Promise<PushResponse> {
+    const payload = options.test === undefined ? event : { ...event, test: options.test };
+    validateEvent(payload);
+    return this.request<PushResponse>(`/api/v2/signal-sources/push/${encodeURIComponent(this.appId)}/events`, payload, "push");
   }
 
   /** Edit the source bound to these credentials using the owner's existing rules. */
@@ -177,6 +187,7 @@ export class SignalSourceClient {
 }
 
 function validateEvent(event: NewsItem): void {
+  if (event.test !== undefined && typeof event.test !== "boolean") throw new Error("test must be a boolean");
   if (event.meta !== undefined && !isRecord(event.meta)) throw new Error("meta must be an object");
   for (const field of ["text", "ts"] as const) {
     if (typeof event[field] !== "string" || !event[field].trim()) throw new Error(`${field} is required`);

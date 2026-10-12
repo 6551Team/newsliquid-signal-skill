@@ -36,6 +36,28 @@ test("update signs its operation and returns source data without requiring news 
   assert.deepEqual(result, { id: 8, description: "Updated" });
 });
 
+test("test pushes sign the mode without mutating the event and return saved-only results", async () => {
+  const input = { text: "test signal", ts: "2026-10-12T08:00:00Z", meta: { chain: "solana" } };
+  const instance = client(async (_, options) => {
+    assert.deepEqual(JSON.parse(options.body), { ...input, test: true });
+    const expected = createHmac("sha256", "secret").update(`1720000000\nnonce-1\n${options.body}`).digest("hex");
+    assert.equal(options.headers["x-signal-signature"], expected);
+    return new Response('{"data":{"dbNewsId":"8:test-event","test":true,"queued":false}}');
+  });
+  assert.deepEqual(await instance.push(input, { test: true }), { dbNewsId: "8:test-event", test: true, queued: false });
+  assert.equal(input.test, undefined);
+});
+
+test("explicit normal mode overrides a test event and invalid modes are not sent", async () => {
+  const event = { text: "signal", ts: "2026-10-12T08:00:00Z", test: true };
+  await client(async (_, options) => {
+    assert.equal(JSON.parse(options.body).test, false);
+    return new Response('{"data":{"queued":true}}');
+  }).push(event, { test: false });
+  assert.equal(event.test, true);
+  await assert.rejects(client(async () => assert.fail("must not send")).push(event, { test: "true" }), /test must be a boolean/);
+});
+
 test("update preserves zero prices and schema definitions in the signed body", async () => {
   const input = {
     description: "描述", monetizationType: "paid", quotaAmount: 0, billingPeriod: "monthly",

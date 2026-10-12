@@ -52,6 +52,26 @@ The request body must be a `NewsItem` JSON object. `text` and an RFC3339 `ts` ar
 
 `id` must be stable within one signal source and is limited to 256 bytes. Reuse the same `id` when retrying a network failure. Each request gets a new nonce, timestamp, and signature. The strategy event key is derived from the signal source and `id`; the request is normalized in memory and is not written to the News table. The request body is limited to 2 MiB, and the timestamp may differ from server time by approximately five minutes.
 
+## Test pushes
+
+Test pushes use the same signed endpoint and validation but only save to the source's push history, which only the owner can view. They do not deliver to any strategy or subscriber. The response includes `test: true` and `queued: false`; history includes `payload.test: true` and is labeled **Test push** in NewsLiquid. Omit the option or set it to `false` for normal delivery.
+
+```ts
+await client.push({ text: "Test signal", ts: new Date().toISOString() }, { test: true });
+```
+
+```python
+client.push({"text": "Test signal", "ts": "2026-10-12T08:00:00Z"}, test=True)
+```
+
+```bash
+newsliquid-signal-cli push --test --file signal.json
+```
+
+For direct HTTP requests, include `"test": true` in the signed JSON body. This is a boolean per-request option. `--test` is only supported for pushing. Use different IDs for test and live signals, or omit `id` to generate a UUID. Upgrade the backend before using test mode.
+
+The **Receive your own signals** switch on each card in **My signal sources** is separate from test mode. To stop your own strategies receiving normal pushes while subscribers continue to receive them, use `client.update({ muteOwnSignals: true })` in Node.js or `client.update({"muteOwnSignals": True})` in Python. Set it to `false` to resume. It defaults to `false` and does not change public visibility or existing history.
+
 ## Subscription filters (`meta`)
 
 When creating or editing a signal source, define optional filter fields. Supported types are enum, number, boolean, and text. Source creators define fields and enum options; subscribers choose numeric comparisons (`gt`, `gte`, `lt`, `lte`, or `eq`) and text comparisons (`contains` or `eq`). Text matching is case-insensitive and literal. NewsLiquid matches each pushed signal against those settings.
@@ -90,6 +110,7 @@ Send only fields you want to change; omitted fields remain unchanged. For exampl
 | --- | --- |
 | `name`, `description`, `website` | Strings; an empty description or website clears it |
 | `visibility` | `private` or `public` |
+| `muteOwnSignals` | Boolean, default `false`; `true` stops delivery to the owner's strategies only |
 | `monetizationType` | `free` or `paid` |
 | `quotaAmount` | Number or decimal string; use `0` when switching to free |
 | `billingPeriod` | `one_time` or `monthly` |

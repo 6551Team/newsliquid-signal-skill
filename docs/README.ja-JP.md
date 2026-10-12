@@ -50,6 +50,26 @@ X-Signal-Signature: 小文字 hex HMAC-SHA256(appSecret, timestamp + "\n" + nonc
 
 同じシグナルソース内で `id` は安定した値にし、256 バイト以内にしてください。ネットワークエラーを再試行するときは同じ `id` を使います。リクエストごとに新しい nonce、タイムスタンプ、署名が生成されます。戦略イベントキーはシグナルソースと `id` から作られ、リクエストはメモリ上で正規化されるだけで News テーブルには保存されません。本文の上限は 2 MiB、タイムスタンプの差は約 5 分以内です。
 
+## テスト送信
+
+テスト送信も同じ署名、形式、meta の検証を行いますが、所有者のみ閲覧できるソースの送信履歴に保存され、ストラテジーや購読者には配信されません。応答には `test: true` と `queued: false`、履歴には `payload.test: true` が含まれ、画面にテスト送信と表示されます。省略または `false` の場合は通常どおり配信します。
+
+```ts
+await client.push({ text: "Test signal", ts: new Date().toISOString() }, { test: true });
+```
+
+```python
+client.push({"text": "Test signal", "ts": "2026-10-12T08:00:00Z"}, test=True)
+```
+
+```bash
+newsliquid-signal-cli push --test --file signal.json
+```
+
+HTTP を直接呼び出す場合は、署名する JSON 本文に `"test":true` を含めてください。リクエストごとの真偽値オプションで、`--test` は送信時のみ使用できます。テストと本番のメッセージには異なる ID を使うか、ID を省略して UUID を生成してください。テストモードの使用前にバックエンドを更新してください。
+
+「マイシグナルソース」の各カードにある自分のシグナルを受信する設定は、テストモードとは独立しています。Node.js では `client.update({ muteOwnSignals: true })`、Python では `client.update({"muteOwnSignals": True})` を使うと、所有者のストラテジーへの通常配信のみ停止します。購読者への配信は続きます。`false` で再開し、既定値は `false` です。公開状態や既存の履歴は変わりません。
+
 ## 購読フィルター（meta）
 
 シグナルソースに列挙型、数値、真偽値、テキストの任意フィルターを定義できます。作成者はフィールドと列挙型の選択肢のみを定義し、購読者が数値の比較（`gt`/`gte`/`lt`/`lte`/`eq`）やテキストの比較（`contains`/`eq`）を設定します。テキストは大文字・小文字を区別せず、文字列の包含または一致で判定します。
@@ -86,6 +106,7 @@ timestamp + "\n" + nonce + "\n" + "signal-source:update\n" + 生の JSON バイ�
 | --- | --- |
 | `name`、`description`、`website` | 文字列。説明とサイトは空文字列で消去可能 |
 | `visibility` | `private` / `public` |
+| `muteOwnSignals` | 真偽値、既定値 `false`。`true` は所有者のストラテジーへの配信のみ停止 |
 | `monetizationType` | `free` / `paid` |
 | `quotaAmount` | 数値または十進文字列。無料に変更する場合は `0` も送信 |
 | `billingPeriod` | `one_time` / `monthly` |

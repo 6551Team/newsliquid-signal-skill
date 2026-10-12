@@ -55,6 +55,32 @@ class ClientTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             client.push({"text": "ok", "ts": "now", "meta": []})
 
+    def test_test_push_signs_mode_and_preserves_event(self):
+        event = {"text": "test signal", "ts": "2026-10-12T08:00:00Z", "meta": {"chain": "solana"}}
+
+        def opener(request, timeout):
+            self.assertEqual(json.loads(request.data), {**event, "test": True})
+            expected = hmac.new(b"secret", b"1720000000\nnonce-1\n" + request.data, hashlib.sha256).hexdigest()
+            self.assertEqual(request.get_header("X-signal-signature"), expected)
+            return FakeResponse(b'{"data":{"dbNewsId":"8:test-event","test":true,"queued":false}}')
+
+        client = SignalSourceClient("app", "secret", clock=lambda: 1720000000, nonce_factory=lambda: "nonce-1", urlopen_fn=opener)
+        self.assertEqual(client.push(event, test=True), {"dbNewsId": "8:test-event", "test": True, "queued": False})
+        self.assertNotIn("test", event)
+
+    def test_explicit_normal_mode_and_invalid_mode(self):
+        event = {"text": "signal", "ts": "2026-10-12T08:00:00Z", "test": True}
+
+        def opener(request, timeout):
+            self.assertFalse(json.loads(request.data)["test"])
+            return FakeResponse(b'{"data":{"queued":true}}')
+
+        client = SignalSourceClient("app", "secret", urlopen_fn=opener)
+        self.assertTrue(client.push(event, test=False)["queued"])
+        self.assertTrue(event["test"])
+        with self.assertRaisesRegex(ValueError, "test must be a boolean"):
+            client.push(event, test="true")
+
     def test_update_uses_operation_signature_and_returns_source(self):
         def opener(request, timeout):
             self.assertEqual(request.full_url, "https://example.test/api/v2/signal-sources/apps/app-12345678")
