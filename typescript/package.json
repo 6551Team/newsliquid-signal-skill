@@ -1,6 +1,6 @@
 {
   "name": "@newsliquid/signal-source",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "NewsLiquid signal source push SDK",
   "type": "module",
   "main": "dist/index.js",

@@ -1,12 +1,12 @@
 # NewsLiquid Signal Source SDK
 
-This repository lets external systems push `NewsItem` signals and edit their NewsLiquid signal source using App ID/App Secret credentials.
+This repository lets external systems push signals, wallet trades and full position snapshots, and edit their NewsLiquid signal source using App ID/App Secret credentials.
 
 The repository contains:
 
 - `typescript/`: Node.js 18+ SDK using the native `fetch` API
 - `python/`: Python 3.10+ SDK using only the standard library
-- `cli/`: Rust command-line tool for pushing signals and editing a source
+- `cli/`: Rust command-line tool for pushing signals and positions, and editing a source
 
 Localized documentation is available in [Chinese](docs/README.zh-CN.md), [Japanese](docs/README.ja-JP.md), and [Korean](docs/README.ko-KR.md).
 
@@ -71,6 +71,61 @@ newsliquid-signal-cli push --test --file signal.json
 For direct HTTP requests, include `"test": true` in the signed JSON body. This is a boolean per-request option. `--test` is only supported for pushing. Use different IDs for test and live signals, or omit `id` to generate a UUID. Upgrade the backend before using test mode.
 
 The **Receive your own signals** switch on each card in **My signal sources** is separate from test mode. To stop your own strategies receiving normal pushes while subscribers continue to receive them, use `client.update({ muteOwnSignals: true })` in Node.js or `client.update({"muteOwnSignals": True})` in Python. Set it to `false` to resume. It defaults to `false` and does not change public visibility or existing history.
+
+## Wallet trades and positions (0.2.0)
+
+Wallet trades use `push()` and the existing `/events` endpoint. Add `walletMonitor` to the event; it keeps the signal source identity, writes event history, and follows signal source strategies:
+
+```ts
+await client.push({
+  id: "trade-123", text: "BTC long opened", ts: new Date().toISOString(),
+  walletMonitor: {
+    kind: "trade", accountId: "aoying", accountName: "Aoying", exchange: "binance", sequence: 123,
+    trade: { symbol: "BTC", side: "long", action: "open_long", quantity: 2, price: 80000 },
+  },
+});
+```
+
+`side` is `long` or `short`. `action` is `open_long`, `close_long`, `open_short`, or `close_short` and must match the side. Trade quantities and prices must be positive; optional fields are `pnl`, `positionUsd`, and `priceEstimated`. Python `push()` and CLI `push --file trade.json` accept the same JSON.
+
+Full positions use a separate endpoint, with the same credentials and push signature (no update marker):
+
+```text
+POST https://news-api.newsliquid.com/api/v2/signal-sources/push/{appId}/positions
+```
+
+```ts
+const snapshot = {
+  id: "snapshot-124", ts: new Date().toISOString(),
+  accountId: "aoying", accountName: "Aoying", exchange: "binance", sequence: 124,
+  positions: [{ symbol: "BTC", side: "long" as const, quantity: 2, entryPrice: 80000, markPrice: 81000 }],
+};
+await client.pushPositions(snapshot);
+await client.pushPositions(snapshot, { test: true }); // Validate without storing.
+```
+
+```python
+from datetime import datetime, timezone
+
+snapshot = {
+    "ts": datetime.now(timezone.utc).isoformat(), "accountId": "aoying", "accountName": "Aoying",
+    "exchange": "binance", "sequence": 124,
+    "positions": [{"symbol": "BTC", "side": "long", "quantity": 2, "entryPrice": 80000, "markPrice": 81000}],
+}
+client.push_positions(snapshot)
+client.push_positions(snapshot, test=True)
+```
+
+Save the same object as `positions.json` for the CLI:
+
+```bash
+newsliquid-signal-cli positions --file positions.json
+newsliquid-signal-cli positions --test --file positions.json
+```
+
+The account identity is `(signal source, exchange, accountId)`, so Binance and FOMO positions stay separate. Each request replaces the full account snapshot; `positions: []` clears it, while a missing/null array is rejected. Do not wrap snapshots in `walletMonitor` or send them to `/events`. `text` and `meta` are unnecessary. `sequence` must be a positive safe integer. Positions allow up to 100 unique symbol/side pairs with positive quantity, entry price and mark price. Optional fields are `unrealizedPnl`, `realizedPnl`, `margin`, `liquidationPrice`, `leverage`, and `marginMode` (`cross`/`isolated`); omit unknown values. `id` and `link` are optional. SDKs check the basic request shape; the backend validates position details.
+
+The response is `{ positions: true, updated: true }`. Repeated, out-of-order, or over-24-hour-old snapshots return `updated: false`; this is a successful response, not a retry request. Retrying must preserve the original `ts` and `sequence`. A newer `(ts, sequence)` refreshes the 24-hour retention period. Snapshots appear in wallet monitoring without event history or strategy triggers. Updates notify the frontend through WSS, with 60-second polling as a fallback. `test: true` returns `{ positions: true, updated: false, test: true }` without saving positions or history. The backend must support `/positions` before using these methods.
 
 ## Subscription filters (`meta`)
 
@@ -184,7 +239,7 @@ print(client.update({"description": "Updated signal source description", "websit
 
 ## Rust CLI
 
-The CLI reads one `NewsItem` JSON object from standard input or from a file passed with `--file`. Credentials and the optional service URL are read from environment variables:
+The CLI reads one JSON object from standard input or a file passed with `--file`: an event for `push`, a full snapshot for `positions`, or source settings for `update`. Credentials and the optional service URL are read from environment variables:
 
 ```bash
 export SIGNAL_SOURCE_APP_ID="..."

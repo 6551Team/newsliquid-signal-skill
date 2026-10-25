@@ -23,6 +23,53 @@ test("push preserves the existing endpoint, signature and meta", async () => {
   assert.deepEqual(result, { queued: true });
 });
 
+test("wallet trades retain structured data and use the event endpoint", async () => {
+  const event = { text: "BTC 开多", ts: "2026-10-25T08:00:00Z", walletMonitor: {
+    kind: "trade", accountId: "aoying", accountName: "熬鹰", exchange: "binance", sequence: 1,
+    trade: { symbol: "BTC", side: "long", action: "open_long", quantity: 2, price: 80000, pnl: 0 },
+  } };
+  const result = await client(async (url, options) => {
+    assert.ok(url.endsWith("/events"));
+    assert.deepEqual(JSON.parse(options.body), event);
+    assert.equal(options.headers["x-signal-signature"], createHmac("sha256", "secret").update(`1720000000\nnonce-1\n${options.body}`).digest("hex"));
+    return new Response('{"data":{"walletMonitor":true,"queued":true}}');
+  }).push(event);
+  assert.deepEqual(result, { walletMonitor: true, queued: true });
+});
+
+test("positions sign their own endpoint for snapshots, clearing, and test mode", async () => {
+  const snapshot = { id: "snapshot-1", ts: "2026-10-25T08:00:00Z", accountId: "aoying",
+    accountName: "熬鹰", exchange: "binance", sequence: 1,
+    positions: [{ symbol: "BTC", side: "long", quantity: 2, entryPrice: 80000, markPrice: 81000, unrealizedPnl: 0 }],
+  };
+  for (const [input, mode] of [[snapshot, {}], [{ ...snapshot, positions: [] }, {}],
+    [snapshot, { test: true }], [{ ...snapshot, test: true }, { test: false }]]) {
+    const original = structuredClone(input);
+    const expected = mode.test === undefined ? input : { ...input, test: mode.test };
+    const response = { positions: true, updated: !expected.test, ...(expected.test ? { test: true } : {}) };
+    assert.deepEqual(await client(async (url, options) => {
+      assert.equal(url, "https://example.test/api/v2/signal-sources/push/app-12345678/positions");
+      assert.equal(options.method, "POST");
+      assert.deepEqual(JSON.parse(options.body), expected);
+      assert.equal(options.headers["x-signal-signature"], createHmac("sha256", "secret").update(`1720000000\nnonce-1\n${options.body}`).digest("hex"));
+      return Response.json({ data: response });
+    }).pushPositions(input, mode), response);
+    assert.deepEqual(input, original);
+  }
+  assert.deepEqual(await client(async () => Response.json({ data: { positions: true, updated: false } })).pushPositions(snapshot),
+    { positions: true, updated: false });
+  await assert.rejects(client(async () => new Response('{"message":"unavailable"}', { status: 503 })).pushPositions(snapshot),
+    (error) => error instanceof SignalSourceError && error.status === 503);
+});
+
+test("positions require an explicit full array and account identity before sending", async () => {
+  const input = { ts: "2026-10-25T08:00:00Z", accountId: "aoying", accountName: "熬鹰", exchange: "fomo", sequence: 1, positions: [] };
+  const instance = client(async () => assert.fail("must not send"));
+  for (const patch of [{ positions: undefined }, { positions: null }, { positions: {} }, { accountId: "" }, { sequence: 0 }, { test: "true" }]) {
+    await assert.rejects(instance.pushPositions({ ...input, ...patch }));
+  }
+});
+
 test("update signs its operation and returns source data without requiring news fields", async () => {
   const result = await client(async (url, options) => {
     assert.equal(url, "https://example.test/api/v2/signal-sources/apps/app-12345678");

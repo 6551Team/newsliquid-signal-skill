@@ -1,12 +1,12 @@
 # NewsLiquid 信号源 SDK
 
-本仓库支持第三方系统使用 App ID/App Secret 推送 `NewsItem` 信号和编辑自己的 NewsLiquid 信号源。
+本仓库支持第三方系统使用 App ID/App Secret 推送信号、钱包交易及完整持仓，并编辑自己的 NewsLiquid 信号源。
 
 仓库内容：
 
 - `typescript/`：Node.js 18+ SDK，使用原生 `fetch`
 - `python/`：Python 3.10+ SDK，只使用标准库
-- `cli/`：用于推送信号和编辑信号源的 Rust 命令行工具
+- `cli/`：用于推送信号、持仓和编辑信号源的 Rust 命令行工具
 
 根目录英文文档见 [README.md](../README.md)。
 
@@ -69,6 +69,61 @@ newsliquid-signal-cli push --test --file signal.json
 直接调用 HTTP 时，在签名的 JSON 请求体中加入 `"test":true`。这是单次请求的布尔选项，CLI 的 `--test` 只支持推送。测试和正式消息请使用不同 ID，或省略 ID 由后端生成 UUID。使用测试模式前先升级后端。
 
 “我的信号源”卡片上的“接收自己的信号”开关与测试模式独立。Node.js 使用 `client.update({ muteOwnSignals: true })`，Python 使用 `client.update({"muteOwnSignals": True})`，仅停止创建者自己的策略接收正常推送，订阅者继续接收；传 `false` 可恢复。默认 `false`，不改变公开状态或已有记录。
+
+## 钱包交易与持仓（0.2.0）
+
+钱包交易继续使用 `push()` 和 `/events`，在事件中增加 `walletMonitor`。保留信号源账户身份、事件历史及信号源策略分发：
+
+```ts
+await client.push({
+  id: "trade-123", text: "BTC 开多", ts: new Date().toISOString(),
+  walletMonitor: {
+    kind: "trade", accountId: "aoying", accountName: "熬鹰", exchange: "binance", sequence: 123,
+    trade: { symbol: "BTC", side: "long", action: "open_long", quantity: 2, price: 80000 },
+  },
+});
+```
+
+`side` 为 `long` 或 `short`，`action` 为 `open_long`、`close_long`、`open_short` 或 `close_short`，须与方向一致。数量、价格必须为正数；可选 `pnl`、`positionUsd`、`priceEstimated`。Python 的 `push()` 和 CLI 的 `push --file trade.json` 使用同一 JSON 格式。
+
+完整持仓使用独立接口，凭证和签名与事件推送相同，不加编辑操作标记：
+
+```text
+POST https://news-api.newsliquid.com/api/v2/signal-sources/push/{appId}/positions
+```
+
+```ts
+const snapshot = {
+  id: "snapshot-124", ts: new Date().toISOString(),
+  accountId: "aoying", accountName: "熬鹰", exchange: "binance", sequence: 124,
+  positions: [{ symbol: "BTC", side: "long" as const, quantity: 2, entryPrice: 80000, markPrice: 81000 }],
+};
+await client.pushPositions(snapshot);
+await client.pushPositions(snapshot, { test: true }); // 仅校验，不保存。
+```
+
+```python
+from datetime import datetime, timezone
+
+snapshot = {
+    "ts": datetime.now(timezone.utc).isoformat(), "accountId": "aoying", "accountName": "熬鹰",
+    "exchange": "binance", "sequence": 124,
+    "positions": [{"symbol": "BTC", "side": "long", "quantity": 2, "entryPrice": 80000, "markPrice": 81000}],
+}
+client.push_positions(snapshot)
+client.push_positions(snapshot, test=True)
+```
+
+CLI 将同一持仓对象保存为 `positions.json` 后推送：
+
+```bash
+newsliquid-signal-cli positions --file positions.json
+newsliquid-signal-cli positions --test --file positions.json
+```
+
+账户按 `(信号源, exchange, accountId)` 区分，因此币安与 FOMO 独立保存。每次发送账户的完整持仓，`positions: []` 表示清仓，缺失或 null 会被拒绝。不要包在 `walletMonitor` 中，也不要发到 `/events`。持仓不需要 `text` 或 `meta`。`sequence` 为正的安全整数；最多 100 条仓位，同币种同方向不能重复，数量、开仓价、标记价必须为正数。可选字段为 `unrealizedPnl`、`realizedPnl`、`margin`、`liquidationPrice`、`leverage`、`marginMode`（`cross`/`isolated`）；未知数值省略。`id`、`link` 可选。SDK 检查基本请求格式，仓位细节由后端统一校验。
+
+响应为 `{ positions: true, updated: true }`。重复、乱序或超过 24 小时的历史快照返回 `updated: false`，属于成功接收，无需重试。网络失败重试时保留原 `ts`、`sequence`。较新的 `(ts, sequence)` 更新持仓并重新计时 24 小时；持仓用于钱包监控展示，不写事件历史、不触发交易策略。前端通过 WSS 刷新，60 秒轮询兜底。`test: true` 返回 `{ positions: true, updated: false, test: true }`，不保存持仓或测试历史。使用前需先部署支持 `/positions` 的后端。
 
 ## 订阅过滤参数（meta）
 

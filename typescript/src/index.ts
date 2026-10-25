@@ -33,6 +33,63 @@ export interface NewsItem {
   tags?: Record<string, unknown> | unknown[];
   score?: number;
   signal?: string;
+  walletMonitor?: WalletMonitor;
+  [key: string]: unknown;
+}
+
+export interface WalletTrade {
+  symbol: string;
+  side: "long" | "short";
+  action: "open_long" | "close_long" | "open_short" | "close_short";
+  quantity: number;
+  price: number;
+  pnl?: number;
+  positionUsd?: number;
+  priceEstimated?: boolean;
+}
+
+/** Send trades through push(); full positions use pushPositions(). */
+export interface WalletMonitor {
+  kind: "trade";
+  accountId: string;
+  accountName: string;
+  exchange: string;
+  sequence: number;
+  trade: WalletTrade;
+}
+
+export interface WalletPosition {
+  symbol: string;
+  side: "long" | "short";
+  quantity: number;
+  entryPrice: number;
+  markPrice: number;
+  unrealizedPnl?: number;
+  realizedPnl?: number;
+  margin?: number;
+  liquidationPrice?: number;
+  leverage?: number;
+  marginMode?: "cross" | "isolated";
+}
+
+export interface PositionsInput {
+  id?: string;
+  /** Validate without storing positions or event history. */
+  test?: boolean;
+  ts: string;
+  link?: string;
+  accountId: string;
+  accountName: string;
+  exchange: string;
+  sequence: number;
+  /** Full account snapshot; an empty array clears the account. */
+  positions: WalletPosition[];
+}
+
+export interface PositionsResponse {
+  positions: boolean;
+  updated: boolean;
+  test?: boolean;
   [key: string]: unknown;
 }
 
@@ -40,6 +97,7 @@ export interface PushResponse {
   dbNewsId?: string;
   queued?: boolean;
   test?: boolean;
+  walletMonitor?: boolean;
   [key: string]: unknown;
 }
 
@@ -135,13 +193,26 @@ export class SignalSourceClient {
     return this.request<PushResponse>(`/api/v2/signal-sources/push/${encodeURIComponent(this.appId)}/events`, payload, "push");
   }
 
+  /** Replace an account's full positions without creating a strategy event. */
+  async pushPositions(input: PositionsInput, options: PushOptions = {}): Promise<PositionsResponse> {
+    if (!isRecord(input)) throw new Error("positions input must be an object");
+    const payload = options.test === undefined ? input : { ...input, test: options.test };
+    if (payload.test !== undefined && typeof payload.test !== "boolean") throw new Error("test must be a boolean");
+    for (const field of ["ts", "accountId", "accountName", "exchange"] as const) {
+      if (typeof payload[field] !== "string" || !payload[field].trim()) throw new Error(`${field} is required`);
+    }
+    if (!Number.isSafeInteger(payload.sequence) || payload.sequence <= 0) throw new Error("sequence must be a positive safe integer");
+    if (!Array.isArray(payload.positions)) throw new Error("positions must be an array; use [] to clear the account");
+    return this.request<PositionsResponse>(`/api/v2/signal-sources/push/${encodeURIComponent(this.appId)}/positions`, payload, "positions");
+  }
+
   /** Edit the source bound to these credentials using the owner's existing rules. */
   async update(input: SignalSourceUpdate): Promise<SignalSourceResponse> {
     if (!isRecord(input)) throw new Error("source configuration must be an object");
     return this.request<SignalSourceResponse>(`/api/v2/signal-sources/apps/${encodeURIComponent(this.appId)}`, input, "update");
   }
 
-  private async request<T extends Record<string, unknown>>(path: string, payload: object, operation: "push" | "update"): Promise<T> {
+  private async request<T extends Record<string, unknown>>(path: string, payload: object, operation: "push" | "positions" | "update"): Promise<T> {
     const body = JSON.stringify(payload);
     const timestamp = String(Math.floor(this.clock()));
     const nonce = this.nonceFactory();

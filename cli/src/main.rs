@@ -15,6 +15,7 @@ const MAX_BODY_BYTES: usize = 2 << 20;
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Operation {
     Push,
+    Positions,
     Update,
 }
 
@@ -30,13 +31,9 @@ async fn run() -> Result<(), String> {
     let (operation, test, input) = read_input()?;
     let mut payload: Value = serde_json::from_slice(&input)
         .map_err(|error| format!("input must be a JSON object: {error}"))?;
-    if operation == Operation::Push {
-        validate_payload(&payload)?;
-        if test {
-            payload["test"] = Value::Bool(true);
-        }
-    } else if !payload.is_object() {
-        return Err("source configuration must be a JSON object".to_string());
+    validate_payload(&payload, operation)?;
+    if test {
+        payload["test"] = Value::Bool(true);
     }
 
     let app_id = required_env("SIGNAL_SOURCE_APP_ID")?;
@@ -62,6 +59,7 @@ async fn run() -> Result<(), String> {
     let app = urlencoding::encode(&app_id);
     let path = match operation {
         Operation::Push => format!("/api/v2/signal-sources/push/{app}/events"),
+        Operation::Positions => format!("/api/v2/signal-sources/push/{app}/positions"),
         Operation::Update => format!("/api/v2/signal-sources/apps/{app}"),
     };
     let url = format!("{base_url}{path}");
@@ -126,6 +124,10 @@ fn parse_args(
             args.next();
             Operation::Push
         }
+        Some("positions") => {
+            args.next();
+            Operation::Positions
+        }
         _ => Operation::Push,
     };
     let mut file = None;
@@ -133,7 +135,7 @@ fn parse_args(
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => {
-                println!("Usage: newsliquid-signal-cli [push|update] [--file PATH] [--test]\n\nReads one JSON object from stdin by default.\n  push    Send a NewsItem (default)\n  update  Edit the signal source bound to the credentials\n  --test  Save a push in source history without strategy delivery");
+                println!("Usage: newsliquid-signal-cli [push|positions|update] [--file PATH] [--test]\n\nReads one JSON object from stdin by default.\n  push       Send a NewsItem or wallet trade (default)\n  positions  Replace an account's full wallet positions\n  update     Edit the signal source bound to the credentials\n  --test     Save a push in test history, or validate positions without storing them");
                 std::process::exit(0);
             }
             "--file" | "-f" => file = Some(args.next().ok_or("--file requires a path")?),
@@ -141,8 +143,8 @@ fn parse_args(
             value => return Err(format!("unknown argument: {value}; use --help")),
         }
     }
-    if test && operation != Operation::Push {
-        return Err("--test is only supported for push".to_string());
+    if test && operation == Operation::Update {
+        return Err("--test is only supported for push or positions".to_string());
     }
     Ok((operation, test, file))
 }
@@ -185,17 +187,20 @@ fn required_env(name: &str) -> Result<String, String> {
     env::var(name).map_err(|_| format!("{name} is required"))
 }
 
-fn validate_payload(payload: &Value) -> Result<(), String> {
+fn validate_payload(payload: &Value, operation: Operation) -> Result<(), String> {
     let object = payload.as_object().ok_or("input must be a JSON object")?;
+    if operation == Operation::Update {
+        return Ok(());
+    }
     if object.get("test").is_some_and(|test| !test.is_boolean()) {
         return Err("test must be a boolean".to_string());
     }
-    if let Some(meta) = object.get("meta") {
-        if !meta.is_object() {
-            return Err("meta must be an object".to_string());
-        }
-    }
-    for field in ["text", "ts"] {
+    let fields: &[&str] = if operation == Operation::Positions {
+        &["ts", "accountId", "accountName", "exchange"]
+    } else {
+        &["text", "ts"]
+    };
+    for &field in fields {
         let value = object
             .get(field)
             .and_then(Value::as_str)
@@ -207,6 +212,24 @@ fn validate_payload(payload: &Value) -> Result<(), String> {
     if let Some(id) = object.get("id") {
         if !id.is_string() || id.as_str().unwrap().as_bytes().len() > 256 {
             return Err("id must be a string of at most 256 characters".to_string());
+        }
+    }
+    if operation == Operation::Positions {
+        if !object
+            .get("sequence")
+            .and_then(Value::as_u64)
+            .is_some_and(|n| n > 0 && n <= 9007199254740991)
+        {
+            return Err("sequence must be a positive safe integer".to_string());
+        }
+        if !object.get("positions").is_some_and(Value::is_array) {
+            return Err("positions must be an array; use [] to clear the account".to_string());
+        }
+        return Ok(());
+    }
+    if let Some(meta) = object.get("meta") {
+        if !meta.is_object() {
+            return Err("meta must be an object".to_string());
         }
     }
     if let Some(score) = object.get("score") {
@@ -245,6 +268,11 @@ mod tests {
             ),
             (vec!["update"], Operation::Update, None),
             (
+                vec!["positions", "--file", "positions.json"],
+                Operation::Positions,
+                Some("positions.json"),
+            ),
+            (
                 vec!["update", "--file", "source.json"],
                 Operation::Update,
                 Some("source.json"),
@@ -273,9 +301,10 @@ mod tests {
         assert!(parse_args(vec!["update", "--test"].into_iter().map(String::from)).is_err());
         let payload =
             serde_json::json!({"text": "signal", "ts": "2026-10-12T08:00:00Z", "test": true});
-        assert!(validate_payload(&payload).is_ok());
+        assert!(validate_payload(&payload, Operation::Push).is_ok());
         assert!(validate_payload(
-            &serde_json::json!({"text": "signal", "ts": "now", "test": "true"})
+            &serde_json::json!({"text": "signal", "ts": "now", "test": "true"}),
+            Operation::Push
         )
         .is_err());
     }
@@ -291,20 +320,53 @@ mod tests {
             sign_request(Operation::Update, "secret", "1720000000", "nonce-1", body).unwrap(),
             "7d331450e2b0a2ceac8835426e67ec3dbf01a9b46d7dfdce686deaf6f03af590"
         );
+        assert_eq!(
+            sign_request(
+                Operation::Positions,
+                "secret",
+                "1720000000",
+                "nonce-1",
+                body
+            )
+            .unwrap(),
+            sign_request(Operation::Push, "secret", "1720000000", "nonce-1", body).unwrap()
+        );
+    }
+
+    #[test]
+    fn positions_accept_full_and_empty_snapshots_without_news_fields() {
+        let (operation, test, _) =
+            parse_args(["positions", "--test"].into_iter().map(String::from)).unwrap();
+        assert_eq!(operation, Operation::Positions);
+        assert!(test);
+        let mut payload = serde_json::json!({"ts": "2026-10-25T08:00:00Z", "accountId": "aoying", "accountName": "熬鹰", "exchange": "binance", "sequence": 1,
+            "positions": [{"symbol": "BTC", "side": "long", "quantity": 2, "entryPrice": 80000, "markPrice": 81000}]});
+        assert!(validate_payload(&payload, operation).is_ok());
+        assert!(validate_payload(&payload, Operation::Push).is_err());
+        payload["positions"] = serde_json::json!([]);
+        assert!(validate_payload(&payload, operation).is_ok());
+        payload["positions"] = Value::Null;
+        assert!(validate_payload(&payload, operation).is_err());
+        payload.as_object_mut().unwrap().remove("positions");
+        assert!(validate_payload(&payload, operation).is_err());
+        payload["positions"] = serde_json::json!([]);
+        payload["sequence"] = serde_json::json!(0);
+        assert!(validate_payload(&payload, operation).is_err());
     }
 
     #[test]
     fn meta_is_preserved_and_must_be_an_object() {
         let payload = serde_json::json!({"text": "signal", "ts": "2026-10-10T08:00:00Z", "meta": {"chain": "solana", "amount": 2500, "buy": false}});
-        assert!(validate_payload(&payload).is_ok());
+        assert!(validate_payload(&payload, Operation::Push).is_ok());
         assert_eq!(
             serde_json::from_slice::<Value>(&serde_json::to_vec(&payload).unwrap()).unwrap()
                 ["meta"],
             payload["meta"]
         );
-        assert!(
-            validate_payload(&serde_json::json!({"text": "signal", "ts": "now", "meta": []}))
-                .is_err()
-        );
+        assert!(validate_payload(
+            &serde_json::json!({"text": "signal", "ts": "now", "meta": []}),
+            Operation::Push
+        )
+        .is_err());
     }
 }

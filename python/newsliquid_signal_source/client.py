@@ -13,7 +13,7 @@ from urllib.request import Request, urlopen
 
 
 DEFAULT_BASE_URL = "https://news-api.newsliquid.com"
-USER_AGENT = "newsliquid-signal-source-python/0.1.0"
+USER_AGENT = "newsliquid-signal-source-python/0.2.0"
 
 
 class SignalSourceError(RuntimeError):
@@ -26,7 +26,7 @@ class SignalSourceError(RuntimeError):
 
 
 class SignalSourceClient:
-    """Push NewsItems and edit a source using App ID/App Secret authentication.
+    """Push signals and wallet positions, or edit a source using App credentials.
 
     ``clock`` and ``nonce_factory`` are injectable to make signing deterministic in
     tests. ``urlopen_fn`` is optional and is useful for applications that provide a
@@ -69,6 +69,28 @@ class SignalSourceClient:
             payload["test"] = test
         self._validate(payload)
         return self._request(f"/api/v2/signal-sources/push/{quote(self.app_id, safe='')}/events", payload, "push")
+
+    def push_positions(self, positions: Mapping[str, Any], *, test: bool | None = None) -> dict[str, Any]:
+        """Replace an account's full positions; an empty positions list clears it.
+
+        Set ``test=True`` to validate without storing positions or event history.
+        """
+        if not isinstance(positions, Mapping):
+            raise ValueError("positions input must be an object")
+        payload = dict(positions)
+        if test is not None:
+            payload["test"] = test
+        if "test" in payload and not isinstance(payload["test"], bool):
+            raise ValueError("test must be a boolean")
+        for field in ("ts", "accountId", "accountName", "exchange"):
+            if not isinstance(payload.get(field), str) or not payload[field].strip():
+                raise ValueError(f"{field} is required")
+        sequence = payload.get("sequence")
+        if isinstance(sequence, bool) or not isinstance(sequence, int) or not 0 < sequence <= 9007199254740991:
+            raise ValueError("sequence must be a positive safe integer")
+        if not isinstance(payload.get("positions"), list):
+            raise ValueError("positions must be an array; use [] to clear the account")
+        return self._request(f"/api/v2/signal-sources/push/{quote(self.app_id, safe='')}/positions", payload, "positions")
 
     def update(self, config: Mapping[str, Any]) -> dict[str, Any]:
         """Edit this credential's source. Omitted fields remain unchanged.

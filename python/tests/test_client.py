@@ -55,6 +55,56 @@ class ClientTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             client.push({"text": "ok", "ts": "now", "meta": []})
 
+    def test_wallet_trade_uses_events(self):
+        event = {"text": "BTC 开多", "ts": "2026-10-25T08:00:00Z", "walletMonitor": {
+            "kind": "trade", "accountId": "aoying", "accountName": "熬鹰", "exchange": "binance", "sequence": 1,
+            "trade": {"symbol": "BTC", "side": "long", "action": "open_long", "quantity": 2, "price": 80000, "pnl": 0},
+        }}
+
+        def opener(request, timeout):
+            self.assertTrue(request.full_url.endswith("/events"))
+            self.assertEqual(json.loads(request.data), event)
+            expected = hmac.new(b"secret", b"1720000000\nnonce-1\n" + request.data, hashlib.sha256).hexdigest()
+            self.assertEqual(request.get_header("X-signal-signature"), expected)
+            return FakeResponse(b'{"data":{"walletMonitor":true,"queued":true}}')
+
+        client = SignalSourceClient("app", "secret", clock=lambda: 1720000000, nonce_factory=lambda: "nonce-1", urlopen_fn=opener)
+        self.assertEqual(client.push(event), {"walletMonitor": True, "queued": True})
+
+    def test_positions_snapshots_clearing_and_test_mode(self):
+        snapshot = {"id": "snapshot-1", "ts": "2026-10-25T08:00:00Z", "accountId": "aoying",
+                    "accountName": "熬鹰", "exchange": "binance", "sequence": 1,
+                    "positions": [{"symbol": "BTC", "side": "long", "quantity": 2, "entryPrice": 80000, "markPrice": 81000, "unrealizedPnl": 0}]}
+        for payload, mode in ((snapshot, None), ({**snapshot, "positions": []}, None),
+                              (snapshot, True), ({**snapshot, "test": True}, False)):
+            original = json.loads(json.dumps(payload))
+            expected = payload if mode is None else {**payload, "test": mode}
+            response = {"positions": True, "updated": not expected.get("test", False)}
+            if expected.get("test"):
+                response["test"] = True
+
+            def opener(request, timeout):
+                self.assertEqual(request.full_url, "https://example.test/api/v2/signal-sources/push/app/positions")
+                self.assertEqual(request.get_method(), "POST")
+                self.assertEqual(json.loads(request.data), expected)
+                signature = hmac.new(b"secret", b"1720000000\nnonce-1\n" + request.data, hashlib.sha256).hexdigest()
+                self.assertEqual(request.get_header("X-signal-signature"), signature)
+                return FakeResponse(json.dumps({"data": response}).encode())
+
+            client = SignalSourceClient("app", "secret", base_url="https://example.test", clock=lambda: 1720000000, nonce_factory=lambda: "nonce-1", urlopen_fn=opener)
+            self.assertEqual(client.push_positions(payload, test=mode), response)
+            self.assertEqual(payload, original)
+        client = SignalSourceClient("app", "secret", urlopen_fn=lambda *_, **__: FakeResponse(b'{"data":{"positions":true,"updated":false}}'))
+        self.assertEqual(client.push_positions(snapshot), {"positions": True, "updated": False})
+
+    def test_positions_require_explicit_array_and_account(self):
+        client = SignalSourceClient("app", "secret", urlopen_fn=lambda *_, **__: self.fail("must not send"))
+        payload = {"ts": "2026-10-25T08:00:00Z", "accountId": "aoying", "accountName": "熬鹰", "exchange": "fomo", "sequence": 1}
+        for patch in ({}, {"positions": None}, {"positions": {}}, {"positions": [], "accountId": ""},
+                      {"positions": [], "sequence": True}, {"positions": [], "sequence": 0}, {"positions": [], "test": "true"}):
+            with self.assertRaises(ValueError):
+                client.push_positions({**payload, **patch})
+
     def test_test_push_signs_mode_and_preserves_event(self):
         event = {"text": "test signal", "ts": "2026-10-12T08:00:00Z", "meta": {"chain": "solana"}}
 
@@ -121,7 +171,8 @@ class ClientTests(unittest.TestCase):
             raise HTTPError("https://example.test", 401, "no", {}, BytesIO(b'{"message":"bad signature"}'))
 
         client = SignalSourceClient("app", "secret", urlopen_fn=opener)
-        for operation, payload in ((client.push, {"id": "x", "text": "ok", "ts": "now"}), (client.update, {"description": "Updated"})):
+        for operation, payload in ((client.push, {"id": "x", "text": "ok", "ts": "now"}), (client.update, {"description": "Updated"}),
+                                   (client.push_positions, {"ts": "now", "accountId": "aoying", "accountName": "熬鹰", "exchange": "fomo", "sequence": 1, "positions": []})):
             with self.assertRaises(SignalSourceError) as caught:
                 operation(payload)
             self.assertEqual(caught.exception.status, 401)
