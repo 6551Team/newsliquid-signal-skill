@@ -1,6 +1,6 @@
 # NewsLiquid Signal Source SDK
 
-This repository lets external systems push signals, wallet trades and full position snapshots, and edit their NewsLiquid signal source using App ID/App Secret credentials.
+This repository lets external systems push signals and full position snapshots, and edit their NewsLiquid signal source using App ID/App Secret credentials.
 
 The repository contains:
 

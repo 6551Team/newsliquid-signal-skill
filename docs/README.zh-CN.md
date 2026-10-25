@@ -1,6 +1,6 @@
 # NewsLiquid 信号源 SDK
 
-本仓库支持第三方系统使用 App ID/App Secret 推送信号、钱包交易及完整持仓，并编辑自己的 NewsLiquid 信号源。
+本仓库支持第三方系统使用 App ID/App Secret 推送信号及完整持仓，并编辑自己的 NewsLiquid 信号源。
 
 仓库内容：
 

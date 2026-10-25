@@ -135,7 +135,7 @@ fn parse_args(
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => {
-                println!("Usage: newsliquid-signal-cli [push|positions|update] [--file PATH] [--test]\n\nReads one JSON object from stdin by default.\n  push       Send a NewsItem or wallet trade (default)\n  positions  Replace an account's full wallet positions\n  update     Edit the signal source bound to the credentials\n  --test     Save a push in test history, or validate positions without storing them");
+                println!("Usage: newsliquid-signal-cli [push|positions|update] [--file PATH] [--test]\n\nReads one JSON object from stdin by default.\n  push       Send a NewsItem (default)\n  positions  Replace an account's full wallet positions\n  update     Edit the signal source bound to the credentials\n  --test     Save a push in test history, or validate positions without storing them");
                 std::process::exit(0);
             }
             "--file" | "-f" => file = Some(args.next().ok_or("--file requires a path")?),
