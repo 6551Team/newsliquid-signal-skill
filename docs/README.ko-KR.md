@@ -114,13 +114,13 @@ SDK와 CLI가 작업 표시자를 자동으로 추가합니다. 시간 허용 �
 
 이름, 설명, 웹사이트와 유효한 필드 변경은 즉시 적용되며 변경 이력을 기록합니다. 기존 key를 유지하면서 필드 추가, 타입이나 표시 이름 수정, 열거 옵션 추가·삭제·변경이 가능합니다. 타입을 변경할 때는 새 타입에 맞는 비교 연산자와 옵션을 사용하세요. 비어 있지 않고 중복되지 않는 열거 옵션을 최소 하나 남겨야 합니다. 타입 변경 후 호환되지 않는 기존 전략 필터는 더 이상 일치하지 않으므로 다시 설정해야 합니다. 삭제된 열거 선택 항목은 더 이상 일치하지 않으며 남은 항목은 계속 작동합니다. 새 신호 전송이나 전략 설정 저장 시 현재 정의를 사용하세요. 공개 요금은 기존 심사 규칙을 따르며 무료, 동일 청구 주기 내 요금 인하, 설정 한도 이하의 요금은 자동 적용됩니다. 심사 대기 상태도 저장에 성공하면 HTTP `200`을 반환하므로 `reviewStatus`, 현재 요금, `pendingMonetizationType` / `pendingQuotaAmount` / `pendingBillingPeriod`를 확인하세요. 소유자가 비활성화한 소스는 수정할 수 있지만 삭제되거나 관리자가 중지한 소스는 수정할 수 없습니다.
 
-## 지갑 거래와 포지션 (0.2.0)
+## 지갑 포지션 (0.2.0)
 
-거래는 `walletMonitor.kind: "trade"`를 포함하여 기존 `push()`로 `/events`에 전송합니다. 전체 포지션 스냅샷은 Node.js의 `client.pushPositions(snapshot)`, Python의 `client.push_positions(snapshot)`, CLI의 `newsliquid-signal-cli positions --file positions.json`으로 전용 `/positions`에 전송합니다. 인증 정보와 서명 방식은 기존 전송과 같습니다.
+거래 알림은 일반 신호 이벤트로 `push()`를 통해 `/events`에 전송합니다. 전체 포지션 스냅샷은 Node.js의 `client.pushPositions(snapshot)`, Python의 `client.push_positions(snapshot)`, CLI의 `newsliquid-signal-cli positions --file positions.json`으로 전용 `/positions`에 전송합니다. 인증 정보와 서명 방식은 기존 전송과 같습니다.
 
 `snapshot`에는 `ts`, `accountId`, `accountName`, `exchange`, `sequence`, `positions`를 포함합니다. `positions: []`는 전체 청산을 나타내며 생략하거나 null을 보내면 거부됩니다. 계정은 신호 소스·거래소·계정 ID별로 구분됩니다. 포지션은 이벤트 기록이나 전략 알림을 만들지 않으며 유효한 갱신 후 24시간이 지나면 만료됩니다. 중복되거나 오래된 스냅샷의 `updated: false`는 정상 응답입니다. Node.js의 `{ test: true }`, Python의 `test=True`, CLI의 `--test`는 저장 없이 검증합니다.
 
-전체 JSON 형식과 예제는 [Wallet trades and positions](../README.md#wallet-trades-and-positions-020)를 참고하세요.
+전체 JSON 형식과 예제는 [Wallet positions](../README.md#wallet-positions-020)를 참고하세요.
 
 ## Node.js / TypeScript SDK
 

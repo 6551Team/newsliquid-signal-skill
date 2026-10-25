@@ -72,21 +72,9 @@ For direct HTTP requests, include `"test": true` in the signed JSON body. This i
 
 The **Receive your own signals** switch on each card in **My signal sources** is separate from test mode. To stop your own strategies receiving normal pushes while subscribers continue to receive them, use `client.update({ muteOwnSignals: true })` in Node.js or `client.update({"muteOwnSignals": True})` in Python. Set it to `false` to resume. It defaults to `false` and does not change public visibility or existing history.
 
-## Wallet trades and positions (0.2.0)
+## Wallet positions (0.2.0)
 
-Wallet trades use `push()` and the existing `/events` endpoint. Add `walletMonitor` to the event; it keeps the signal source identity, writes event history, and follows signal source strategies:
-
-```ts
-await client.push({
-  id: "trade-123", text: "BTC long opened", ts: new Date().toISOString(),
-  walletMonitor: {
-    kind: "trade", accountId: "aoying", accountName: "Aoying", exchange: "binance", sequence: 123,
-    trade: { symbol: "BTC", side: "long", action: "open_long", quantity: 2, price: 80000 },
-  },
-});
-```
-
-`side` is `long` or `short`. `action` is `open_long`, `close_long`, `open_short`, or `close_short` and must match the side. Trade quantities and prices must be positive; optional fields are `pnl`, `positionUsd`, and `priceEstimated`. Python `push()` and CLI `push --file trade.json` accept the same JSON.
+Trade notifications use ordinary signal events through `push()` and `/events`. Account positions use the dedicated methods below.
 
 Full positions use a separate endpoint, with the same credentials and push signature (no update marker):
 
@@ -123,7 +111,7 @@ newsliquid-signal-cli positions --file positions.json
 newsliquid-signal-cli positions --test --file positions.json
 ```
 
-The account identity is `(signal source, exchange, accountId)`, so Binance and FOMO positions stay separate. Each request replaces the full account snapshot; `positions: []` clears it, while a missing/null array is rejected. Do not wrap snapshots in `walletMonitor` or send them to `/events`. `text` and `meta` are unnecessary. `sequence` must be a positive safe integer. Positions allow up to 100 unique symbol/side pairs with positive quantity, entry price and mark price. Optional fields are `unrealizedPnl`, `realizedPnl`, `margin`, `liquidationPrice`, `leverage`, and `marginMode` (`cross`/`isolated`); omit unknown values. `id` and `link` are optional. SDKs check the basic request shape; the backend validates position details.
+The account identity is `(signal source, exchange, accountId)`, so Binance and FOMO positions stay separate. Each request replaces the full account snapshot; `positions: []` clears it, while a missing/null array is rejected. Send snapshots directly to `/positions`. `text` and `meta` are unnecessary. `sequence` must be a positive safe integer. Positions allow up to 100 unique symbol/side pairs with positive quantity, entry price and mark price. Optional fields are `unrealizedPnl`, `realizedPnl`, `margin`, `liquidationPrice`, `leverage`, and `marginMode` (`cross`/`isolated`); omit unknown values. `id` and `link` are optional. SDKs check the basic request shape; the backend validates position details.
 
 The response is `{ positions: true, updated: true }`. Repeated, out-of-order, or over-24-hour-old snapshots return `updated: false`; this is a successful response, not a retry request. Retrying must preserve the original `ts` and `sequence`. A newer `(ts, sequence)` refreshes the 24-hour retention period. Snapshots appear in wallet monitoring without event history or strategy triggers. Updates notify the frontend through WSS, with 60-second polling as a fallback. `test: true` returns `{ positions: true, updated: false, test: true }` without saving positions or history. The backend must support `/positions` before using these methods.
 

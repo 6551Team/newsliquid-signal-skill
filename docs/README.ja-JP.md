@@ -114,13 +114,13 @@ timestamp + "\n" + nonce + "\n" + "signal-source:update\n" + 生の JSON バイ�
 
 名前、説明、サイト、有効なスキーマ変更は即時反映され、履歴に記録されます。既存の key を残したまま、フィールド追加、型やラベルの変更、列挙値の追加・削除・変更が可能です。型を変更する際は、新しい型に対応した比較演算子と選択肢を指定してください。空でない重複のない列挙値を少なくとも一つ残してください。型変更後に互換性のない既存のフィルターは一致しなくなるため、再設定が必要です。削除された列挙値は一致しなくなり、残った選択肢は引き続き機能します。新しい送信やストラテジー設定の保存には現在の定義を使ってください。公開料金は既存の審査ルールを適用し、無料、同じ課金周期内の値下げ、設定上限以下の料金は自動反映されます。審査待ちでも保存成功時は HTTP `200` を返すため、`reviewStatus`、有効な料金、`pendingMonetizationType` / `pendingQuotaAmount` / `pendingBillingPeriod` を確認してください。所有者が無効にしたソースは編集できますが、削除済みまたは管理者が停止したソースは編集できません。
 
-## ウォレット取引とポジション（0.2.0）
+## ウォレットポジション（0.2.0）
 
-取引は `walletMonitor.kind: "trade"` を含め、従来の `push()` で `/events` に送信します。全ポジションのスナップショットは Node.js の `client.pushPositions(snapshot)`、Python の `client.push_positions(snapshot)`、CLI の `newsliquid-signal-cli positions --file positions.json` で専用の `/positions` に送信します。認証情報と署名方式は既存の送信と同じです。
+取引通知は通常のシグナルイベントとして `push()` で `/events` に送信します。全ポジションのスナップショットは Node.js の `client.pushPositions(snapshot)`、Python の `client.push_positions(snapshot)`、CLI の `newsliquid-signal-cli positions --file positions.json` で専用の `/positions` に送信します。認証情報と署名方式は既存の送信と同じです。
 
 `snapshot` には `ts`、`accountId`、`accountName`、`exchange`、`sequence`、`positions` を含めます。`positions: []` は全決済を表し、省略や null は拒否されます。アカウントはシグナルソース・取引所・アカウント ID ごとに分かれます。ポジションはイベント履歴やストラテジー配信を作らず、有効な更新から 24 時間後に期限切れになります。重複や古いスナップショットの `updated: false` は正常応答です。Node.js の `{ test: true }`、Python の `test=True`、CLI の `--test` は保存せずに検証します。
 
-完全な JSON 形式と例は [Wallet trades and positions](../README.md#wallet-trades-and-positions-020) を参照してください。
+完全な JSON 形式と例は [Wallet positions](../README.md#wallet-positions-020) を参照してください。
 
 ## Node.js / TypeScript SDK
 

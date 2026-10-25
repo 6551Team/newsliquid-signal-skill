@@ -70,21 +70,9 @@ newsliquid-signal-cli push --test --file signal.json
 
 “我的信号源”卡片上的“接收自己的信号”开关与测试模式独立。Node.js 使用 `client.update({ muteOwnSignals: true })`，Python 使用 `client.update({"muteOwnSignals": True})`，仅停止创建者自己的策略接收正常推送，订阅者继续接收；传 `false` 可恢复。默认 `false`，不改变公开状态或已有记录。
 
-## 钱包交易与持仓（0.2.0）
+## 钱包持仓（0.2.0）
 
-钱包交易继续使用 `push()` 和 `/events`，在事件中增加 `walletMonitor`。保留信号源账户身份、事件历史及信号源策略分发：
-
-```ts
-await client.push({
-  id: "trade-123", text: "BTC 开多", ts: new Date().toISOString(),
-  walletMonitor: {
-    kind: "trade", accountId: "aoying", accountName: "熬鹰", exchange: "binance", sequence: 123,
-    trade: { symbol: "BTC", side: "long", action: "open_long", quantity: 2, price: 80000 },
-  },
-});
-```
-
-`side` 为 `long` 或 `short`，`action` 为 `open_long`、`close_long`、`open_short` 或 `close_short`，须与方向一致。数量、价格必须为正数；可选 `pnl`、`positionUsd`、`priceEstimated`。Python 的 `push()` 和 CLI 的 `push --file trade.json` 使用同一 JSON 格式。
+交易通知通过 `push()` 和 `/events` 发送普通信号源事件。账户持仓通过下面的独立方法更新。
 
 完整持仓使用独立接口，凭证和签名与事件推送相同，不加编辑操作标记：
 
@@ -121,7 +109,7 @@ newsliquid-signal-cli positions --file positions.json
 newsliquid-signal-cli positions --test --file positions.json
 ```
 
-账户按 `(信号源, exchange, accountId)` 区分，因此币安与 FOMO 独立保存。每次发送账户的完整持仓，`positions: []` 表示清仓，缺失或 null 会被拒绝。不要包在 `walletMonitor` 中，也不要发到 `/events`。持仓不需要 `text` 或 `meta`。`sequence` 为正的安全整数；最多 100 条仓位，同币种同方向不能重复，数量、开仓价、标记价必须为正数。可选字段为 `unrealizedPnl`、`realizedPnl`、`margin`、`liquidationPrice`、`leverage`、`marginMode`（`cross`/`isolated`）；未知数值省略。`id`、`link` 可选。SDK 检查基本请求格式，仓位细节由后端统一校验。
+账户按 `(信号源, exchange, accountId)` 区分，因此币安与 FOMO 独立保存。每次发送账户的完整持仓，`positions: []` 表示清仓，缺失或 null 会被拒绝。持仓直接发到 `/positions`，不需要 `text` 或 `meta`。`sequence` 为正的安全整数；最多 100 条仓位，同币种同方向不能重复，数量、开仓价、标记价必须为正数。可选字段为 `unrealizedPnl`、`realizedPnl`、`margin`、`liquidationPrice`、`leverage`、`marginMode`（`cross`/`isolated`）；未知数值省略。`id`、`link` 可选。SDK 检查基本请求格式，仓位细节由后端统一校验。
 
 响应为 `{ positions: true, updated: true }`。重复、乱序或超过 24 小时的历史快照返回 `updated: false`，属于成功接收，无需重试。网络失败重试时保留原 `ts`、`sequence`。较新的 `(ts, sequence)` 更新持仓并重新计时 24 小时；持仓用于钱包监控展示，不写事件历史、不触发交易策略。前端通过 WSS 刷新，60 秒轮询兜底。`test: true` 返回 `{ positions: true, updated: false, test: true }`，不保存持仓或测试历史。使用前需先部署支持 `/positions` 的后端。
 

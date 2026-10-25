@@ -33,29 +33,7 @@ export interface NewsItem {
   tags?: Record<string, unknown> | unknown[];
   score?: number;
   signal?: string;
-  walletMonitor?: WalletMonitor;
   [key: string]: unknown;
-}
-
-export interface WalletTrade {
-  symbol: string;
-  side: "long" | "short";
-  action: "open_long" | "close_long" | "open_short" | "close_short";
-  quantity: number;
-  price: number;
-  pnl?: number;
-  positionUsd?: number;
-  priceEstimated?: boolean;
-}
-
-/** Send trades through push(); full positions use pushPositions(). */
-export interface WalletMonitor {
-  kind: "trade";
-  accountId: string;
-  accountName: string;
-  exchange: string;
-  sequence: number;
-  trade: WalletTrade;
 }
 
 export interface WalletPosition {
@@ -97,7 +75,6 @@ export interface PushResponse {
   dbNewsId?: string;
   queued?: boolean;
   test?: boolean;
-  walletMonitor?: boolean;
   [key: string]: unknown;
 }
 

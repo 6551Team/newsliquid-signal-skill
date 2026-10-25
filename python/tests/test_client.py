@@ -55,22 +55,6 @@ class ClientTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             client.push({"text": "ok", "ts": "now", "meta": []})
 
-    def test_wallet_trade_uses_events(self):
-        event = {"text": "BTC 开多", "ts": "2026-10-25T08:00:00Z", "walletMonitor": {
-            "kind": "trade", "accountId": "aoying", "accountName": "熬鹰", "exchange": "binance", "sequence": 1,
-            "trade": {"symbol": "BTC", "side": "long", "action": "open_long", "quantity": 2, "price": 80000, "pnl": 0},
-        }}
-
-        def opener(request, timeout):
-            self.assertTrue(request.full_url.endswith("/events"))
-            self.assertEqual(json.loads(request.data), event)
-            expected = hmac.new(b"secret", b"1720000000\nnonce-1\n" + request.data, hashlib.sha256).hexdigest()
-            self.assertEqual(request.get_header("X-signal-signature"), expected)
-            return FakeResponse(b'{"data":{"walletMonitor":true,"queued":true}}')
-
-        client = SignalSourceClient("app", "secret", clock=lambda: 1720000000, nonce_factory=lambda: "nonce-1", urlopen_fn=opener)
-        self.assertEqual(client.push(event), {"walletMonitor": True, "queued": True})
-
     def test_positions_snapshots_clearing_and_test_mode(self):
         snapshot = {"id": "snapshot-1", "ts": "2026-10-25T08:00:00Z", "accountId": "aoying",
                     "accountName": "熬鹰", "exchange": "binance", "sequence": 1,
