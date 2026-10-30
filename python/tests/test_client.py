@@ -27,6 +27,21 @@ class FakeResponse:
 
 
 class ClientTests(unittest.TestCase):
+    def test_wallet_history_uses_dedicated_signed_endpoint(self):
+        payload = {"ts": "2026-10-30T08:00:00Z", "exchange": "binance", "accountId": "aoying", "records": []}
+        def opener(request, timeout):
+            self.assertTrue(request.full_url.endswith("/push/app/wallet-history"))
+            self.assertEqual(json.loads(request.data), {**payload, "test": True})
+            expected = hmac.new(b"secret", b"1720000000\nnonce-1\n" + request.data, hashlib.sha256).hexdigest()
+            self.assertEqual(request.get_header("X-signal-signature"), expected)
+            return FakeResponse(b'{"data":{"history":true,"updated":0,"test":true}}')
+        client = SignalSourceClient("app", "secret", clock=lambda: 1720000000, nonce_factory=lambda: "nonce-1", urlopen_fn=opener)
+        self.assertEqual(client.push_wallet_history(payload, test=True), {"history": True, "updated": 0, "test": True})
+        self.assertNotIn("test", payload)
+        for patch in ({"records": None}, {"records": [{}] * 201}, {"accountId": ""}, {"test": "true"}):
+            with self.assertRaises(ValueError):
+                client.push_wallet_history({**payload, **patch})
+
     def test_signs_exact_body_and_returns_data(self):
         requests = []
 

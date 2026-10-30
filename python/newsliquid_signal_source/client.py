@@ -13,7 +13,7 @@ from urllib.request import Request, urlopen
 
 
 DEFAULT_BASE_URL = "https://news-api.newsliquid.com"
-USER_AGENT = "newsliquid-signal-source-python/0.2.0"
+USER_AGENT = "newsliquid-signal-source-python/0.3.0"
 
 
 class SignalSourceError(RuntimeError):
@@ -91,6 +91,22 @@ class SignalSourceClient:
         if not isinstance(payload.get("positions"), list):
             raise ValueError("positions must be an array; use [] to clear the account")
         return self._request(f"/api/v2/signal-sources/push/{quote(self.app_id, safe='')}/positions", payload, "positions")
+
+    def push_wallet_history(self, history: Mapping[str, Any], *, test: bool | None = None) -> dict[str, Any]:
+        """Upsert account history; never publish events or change current positions."""
+        if not isinstance(history, Mapping):
+            raise ValueError("wallet history input must be an object")
+        payload = dict(history)
+        if test is not None:
+            payload["test"] = test
+        if "test" in payload and not isinstance(payload["test"], bool):
+            raise ValueError("test must be a boolean")
+        for field in ("ts", "accountId", "exchange"):
+            if not isinstance(payload.get(field), str) or not payload[field].strip():
+                raise ValueError(f"{field} is required")
+        if not isinstance(payload.get("records"), list) or len(payload["records"]) > 200:
+            raise ValueError("records must be an array of at most 200 records")
+        return self._request(f"/api/v2/signal-sources/push/{quote(self.app_id, safe='')}/wallet-history", payload, "wallet-history")
 
     def update(self, config: Mapping[str, Any]) -> dict[str, Any]:
         """Edit this credential's source. Omitted fields remain unchanged.

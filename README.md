@@ -72,6 +72,22 @@ For direct HTTP requests, include `"test": true` in the signed JSON body. This i
 
 The **Receive your own signals** switch on each card in **My signal sources** is separate from test mode. To stop your own strategies receiving normal pushes while subscribers continue to receive them, use `client.update({ muteOwnSignals: true })` in Node.js or `client.update({"muteOwnSignals": True})` in Python. Set it to `false` to resume. It defaults to `false` and does not change public visibility or existing history.
 
+## Wallet history (0.3.0)
+
+`client.pushWalletHistory(input)` (TypeScript), `client.push_wallet_history(input)` (Python), and `newsliquid-signal-cli wallet-history --file history.json` send to `POST /api/v2/signal-sources/push/{appId}/wallet-history` using the existing push HMAC signature.
+
+```ts
+await client.pushWalletHistory({
+  ts: "2026-10-30T09:00:00Z", exchange: "hyperliquid", accountId: "0x354dd2b1719ee86a2f4e04befa137c1cbe80c667",
+  records: [{ id: "fill-1", type: "trade", symbol: "ETH", side: "long", action: "close",
+    time: "2026-10-30T08:00:00Z", quantity: 2, price: 2300, realizedPnl: 100 }],
+});
+```
+
+Each batch upserts at most 200 records by source/exchange/account/record ID. `ts` is the observation time; older or identical observations do not overwrite newer ones. Empty batches do not clear history. `type: "trade"` uses fill time, size, price and `action` (`open`, `close`, `flip`). `type: "position"` uses opening time, maximum position size and average entry price, with optional `closedAt`, `closePrice`, `closedQuantity`, `realizedPnl`, `roi` (decimal ratio), and `leverage`; it has no `action`. History is separate from events and current positions, and has no 24-hour expiry. Deploy backend support before use.
+
+The response is `{history: true, updated: 1}`. Test mode validates without writing and returns `{history: true, updated: 0, test: true}`. Query with a user login token: `GET /api/v2/signal-sources/{id}/wallet-history?exchange=binance&accountId=aoying&page=1&limit=20`; it returns `{success:true,data:[...],total:1,pagination:{page:1,limit:20,total:1}}`. Reads require source ownership or an active subscription.
+
 ## Wallet positions (0.2.0)
 
 Trade notifications use ordinary signal events through `push()` and `/events`. Account positions use the dedicated methods below.

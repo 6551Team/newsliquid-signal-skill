@@ -71,6 +71,43 @@ export interface PositionsResponse {
   [key: string]: unknown;
 }
 
+export interface WalletHistoryRecord {
+  id: string;
+  type: "trade" | "position";
+  symbol: string;
+  side: "long" | "short";
+  /** Fill time for trades; opening time for position summaries (RFC3339). */
+  time: string;
+  /** Fill size for trades; maximum position size for position summaries. */
+  quantity: number;
+  /** Fill price for trades; average entry price for position summaries. */
+  price: number;
+  action?: "open" | "close" | "flip";
+  realizedPnl?: number;
+  closedAt?: string;
+  closePrice?: number;
+  closedQuantity?: number;
+  roi?: number;
+  leverage?: number;
+}
+
+export interface WalletHistoryInput {
+  /** Validate without storing history. */
+  test?: boolean;
+  ts: string;
+  accountId: string;
+  exchange: string;
+  /** Upsert at most 200 records. Omitted records and empty batches never delete history. */
+  records: WalletHistoryRecord[];
+}
+
+export interface WalletHistoryResponse {
+  history: boolean;
+  updated: number;
+  test?: boolean;
+  [key: string]: unknown;
+}
+
 export interface PushResponse {
   dbNewsId?: string;
   queued?: boolean;
@@ -189,7 +226,19 @@ export class SignalSourceClient {
     return this.request<SignalSourceResponse>(`/api/v2/signal-sources/apps/${encodeURIComponent(this.appId)}`, input, "update");
   }
 
-  private async request<T extends Record<string, unknown>>(path: string, payload: object, operation: "push" | "positions" | "update"): Promise<T> {
+  /** Upsert account history without publishing events or changing current positions. */
+  async pushWalletHistory(input: WalletHistoryInput, options: PushOptions = {}): Promise<WalletHistoryResponse> {
+    if (!isRecord(input)) throw new Error("wallet history input must be an object");
+    const payload = options.test === undefined ? input : { ...input, test: options.test };
+    if (payload.test !== undefined && typeof payload.test !== "boolean") throw new Error("test must be a boolean");
+    for (const field of ["ts", "accountId", "exchange"] as const) {
+      if (typeof payload[field] !== "string" || !payload[field].trim()) throw new Error(`${field} is required`);
+    }
+    if (!Array.isArray(payload.records) || payload.records.length > 200) throw new Error("records must be an array of at most 200 records");
+    return this.request<WalletHistoryResponse>(`/api/v2/signal-sources/push/${encodeURIComponent(this.appId)}/wallet-history`, payload, "wallet-history");
+  }
+
+  private async request<T extends Record<string, unknown>>(path: string, payload: object, operation: "push" | "positions" | "wallet-history" | "update"): Promise<T> {
     const body = JSON.stringify(payload);
     const timestamp = String(Math.floor(this.clock()));
     const nonce = this.nonceFactory();

@@ -70,6 +70,29 @@ newsliquid-signal-cli push --test --file signal.json
 
 “我的信号源”卡片上的“接收自己的信号”开关与测试模式独立。Node.js 使用 `client.update({ muteOwnSignals: true })`，Python 使用 `client.update({"muteOwnSignals": True})`，仅停止创建者自己的策略接收正常推送，订阅者继续接收；传 `false` 可恢复。默认 `false`，不改变公开状态或已有记录。
 
+## 钱包历史（0.3.0）
+
+TypeScript：`client.pushWalletHistory(input)`；Python：`client.push_wallet_history(input)`；CLI：`newsliquid-signal-cli wallet-history --file history.json`。
+
+接口为 `POST /api/v2/signal-sources/push/{appId}/wallet-history`，沿用现有推送 HMAC 签名。
+
+```json
+{
+  "ts": "2026-10-30T09:00:00Z", "exchange": "binance", "accountId": "aoying",
+  "records": [{"id":"position-1","type":"position","symbol":"ETH","side":"short",
+    "time":"2026-10-29T08:00:00Z","quantity":10,"price":2300,
+    "closedAt":"2026-10-30T08:00:00Z","closePrice":2200,"closedQuantity":10,"realizedPnl":1000}]
+}
+```
+
+每批最多 200 条，按信号源、平台、账户、记录 ID 更新；较旧或相同 `ts` 不覆盖新数据。`ts` 是采集时间。空数组不删历史，历史不参与实时持仓的 24 小时清理，不触发事件。
+
+`position` 表示历史仓位，`time/quantity/price` 为开仓时间、最大持仓量、开仓均价，可选平仓时间/均价/数量、已实现盈亏、`roi`（小数收益率）、杠杆；`trade` 表示成交，对应成交时间/数量/价格，需传 `action: open/close/flip`，不传平仓汇总字段。`side` 为仓位方向，反手时为目标方向。
+
+返回 `{history:true,updated:1}`。`test: true` 只校验接口和表，返回 `{history:true,updated:0,test:true}`。使用前先升级后台。
+
+前端用登录 token 查询：`GET /api/v2/signal-sources/{id}/wallet-history?exchange=binance&accountId=aoying&page=1&limit=20`。返回 `{success:true,data:[...],total:1,pagination:{page:1,limit:20,total:1}}`，按时间倒序，仅创建者或有效订阅用户可查。
+
 ## 钱包持仓（0.2.0）
 
 交易通知通过 `push()` 和 `/events` 发送普通信号源事件。账户持仓通过下面的独立方法更新。

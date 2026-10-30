@@ -10,6 +10,24 @@ function client(fetch) {
   });
 }
 
+test("wallet history uses its dedicated signed endpoint and keeps test requests immutable", async () => {
+  const input = { ts: "2026-10-30T08:00:00Z", exchange: "binance", accountId: "aoying", records: [
+    { id: "position-1", type: "position", symbol: "ETH", side: "short", time: "2026-10-29T08:00:00Z", quantity: 10, price: 2200 },
+  ] };
+  const original = structuredClone(input);
+  const result = await client(async (url, options) => {
+    assert.equal(url, "https://example.test/api/v2/signal-sources/push/app-12345678/wallet-history");
+    assert.deepEqual(JSON.parse(options.body), { ...input, test: true });
+    assert.equal(options.headers["x-signal-signature"], createHmac("sha256", "secret").update(`1720000000\nnonce-1\n${options.body}`).digest("hex"));
+    return Response.json({ data: { history: true, updated: 0, test: true } });
+  }).pushWalletHistory(input, { test: true });
+  assert.deepEqual(result, { history: true, updated: 0, test: true });
+  assert.deepEqual(input, original);
+  for (const patch of [{ records: null }, { records: Array(201).fill(input.records[0]) }, { exchange: "" }, { test: "true" }]) {
+    await assert.rejects(client(async () => assert.fail("must not send")).pushWalletHistory({ ...input, ...patch }));
+  }
+});
+
 test("push preserves the existing endpoint, signature and meta", async () => {
   const input = { text: "中文", ts: "2026-10-11T08:00:00Z", meta: { chain: "solana", buy: false } };
   const result = await client(async (url, options) => {

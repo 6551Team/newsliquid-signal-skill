@@ -16,6 +16,7 @@ const MAX_BODY_BYTES: usize = 2 << 20;
 enum Operation {
     Push,
     Positions,
+    WalletHistory,
     Update,
 }
 
@@ -60,6 +61,7 @@ async fn run() -> Result<(), String> {
     let path = match operation {
         Operation::Push => format!("/api/v2/signal-sources/push/{app}/events"),
         Operation::Positions => format!("/api/v2/signal-sources/push/{app}/positions"),
+        Operation::WalletHistory => format!("/api/v2/signal-sources/push/{app}/wallet-history"),
         Operation::Update => format!("/api/v2/signal-sources/apps/{app}"),
     };
     let url = format!("{base_url}{path}");
@@ -128,6 +130,10 @@ fn parse_args(
             args.next();
             Operation::Positions
         }
+        Some("wallet-history") => {
+            args.next();
+            Operation::WalletHistory
+        }
         _ => Operation::Push,
     };
     let mut file = None;
@@ -135,7 +141,7 @@ fn parse_args(
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => {
-                println!("Usage: newsliquid-signal-cli [push|positions|update] [--file PATH] [--test]\n\nReads one JSON object from stdin by default.\n  push       Send a NewsItem (default)\n  positions  Replace an account's full wallet positions\n  update     Edit the signal source bound to the credentials\n  --test     Save a push in test history, or validate positions without storing them");
+                println!("Usage: newsliquid-signal-cli [push|positions|wallet-history|update] [--file PATH] [--test]\n\nReads one JSON object from stdin by default.\n  push       Send a NewsItem (default)\n  positions  Replace an account's full wallet positions\n  wallet-history  Upsert an account's history\n  update     Edit the signal source bound to the credentials\n  --test     Save a push in test history, or validate positions/history without storing them");
                 std::process::exit(0);
             }
             "--file" | "-f" => file = Some(args.next().ok_or("--file requires a path")?),
@@ -144,7 +150,7 @@ fn parse_args(
         }
     }
     if test && operation == Operation::Update {
-        return Err("--test is only supported for push or positions".to_string());
+        return Err("--test is only supported for push, positions or wallet-history".to_string());
     }
     Ok((operation, test, file))
 }
@@ -197,6 +203,8 @@ fn validate_payload(payload: &Value, operation: Operation) -> Result<(), String>
     }
     let fields: &[&str] = if operation == Operation::Positions {
         &["ts", "accountId", "accountName", "exchange"]
+    } else if operation == Operation::WalletHistory {
+        &["ts", "accountId", "exchange"]
     } else {
         &["text", "ts"]
     };
@@ -213,6 +221,16 @@ fn validate_payload(payload: &Value, operation: Operation) -> Result<(), String>
         if !id.is_string() || id.as_str().unwrap().as_bytes().len() > 256 {
             return Err("id must be a string of at most 256 characters".to_string());
         }
+    }
+    if operation == Operation::WalletHistory {
+        if !object
+            .get("records")
+            .and_then(Value::as_array)
+            .is_some_and(|rows| rows.len() <= 200)
+        {
+            return Err("records must be an array of at most 200 records".to_string());
+        }
+        return Ok(());
     }
     if operation == Operation::Positions {
         if !object
@@ -251,6 +269,21 @@ fn validate_payload(payload: &Value, operation: Operation) -> Result<(), String>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wallet_history_has_a_separate_contract() {
+        let (operation, test, _) =
+            parse_args(["wallet-history", "--test"].into_iter().map(String::from)).unwrap();
+        assert_eq!(operation, Operation::WalletHistory);
+        assert!(test);
+        let input = serde_json::json!({"ts":"2026-10-30T08:00:00Z","exchange":"binance","accountId":"aoying","records":[]});
+        assert!(validate_payload(&input, operation).is_ok());
+        assert!(validate_payload(&input, Operation::Positions).is_err());
+        assert!(validate_payload(&input, Operation::Push).is_err());
+        let mut invalid = input.clone();
+        invalid["records"] = Value::Null;
+        assert!(validate_payload(&invalid, operation).is_err());
+    }
 
     #[test]
     fn commands_keep_legacy_push_usage() {
